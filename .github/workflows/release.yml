@@ -68,7 +68,7 @@ jobs:
 
       - name: Check the app bundle
         run: |
-          APP=build/Minutes.app
+          APP=build.noindex/Minutes.app
           codesign --verify --strict --verbose=2 "$APP"
           lipo -archs "$APP/Contents/MacOS/Minutes"
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
@@ -79,7 +79,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/support" "$RUNNER_TEMP/shots"
           printf '{"libraryPath": "%s/docs/demo-library", "useCalendar": false}\n' "$PWD" > "$RUNNER_TEMP/support/settings.json"
-          MINUTES_SUPPORT_DIR="$RUNNER_TEMP/support" build/Minutes.app/Contents/MacOS/Minutes --snapshot "$RUNNER_TEMP/shots" | tee "$RUNNER_TEMP/shots/checks.txt"
+          MINUTES_SUPPORT_DIR="$RUNNER_TEMP/support" build.noindex/Minutes.app/Contents/MacOS/Minutes --snapshot "$RUNNER_TEMP/shots" | tee "$RUNNER_TEMP/shots/checks.txt"
           ! grep -q FAILED "$RUNNER_TEMP/shots/checks.txt"
 
       - uses: actions/upload-artifact@v4

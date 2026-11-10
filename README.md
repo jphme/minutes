@@ -216,7 +216,7 @@ swift build -c release                      # app + CLI
 .build/release/minutes-cli compare --library <dir> --meeting "<folder>" --models claude-haiku-5-5:high,claude-sonnet-5-5:low --out ab.json
 .build/release/minutes-cli sync-notes       # export all finished meetings to the configured repository
 .build/release/minutes-cli delete --meeting "<folder>"
-build/Minutes.app/Contents/MacOS/Minutes --snapshot /tmp/snap   # render the UI to PNGs
+build.noindex/Minutes.app/Contents/MacOS/Minutes --snapshot /tmp/snap   # render the UI to PNGs
 open -n -a ~/Applications/Minutes.app --args --calendar-report /tmp/cal.txt 2   # calendars and events the app sees
 .build/release/minutes-cli passive --seconds 120 --library /tmp/lib --digest   # passive capture + CPU/ANE stats
 .build/release/minutes-cli passive --seconds 75 --library /tmp/lib --me-file me.wav --them-file them.wav --preview   # the same from files, nothing audible

@@ -22,7 +22,8 @@ done
 
 swift build -c release --product Minutes
 
-APP=build/Minutes.app
+# Spotlight skips folders ending in .noindex, so the built copy does not show up next to the installed app.
+APP=build.noindex/Minutes.app
 BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Resources/Info.plist)
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

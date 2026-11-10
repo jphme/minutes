@@ -21,7 +21,7 @@ scripts/build-app.sh --no-install
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
-cp -R build/Minutes.app "$STAGE/"
+cp -R build.noindex/Minutes.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 mkdir -p dist
 DMG="dist/Minutes-$VERSION.dmg"
