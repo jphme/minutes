@@ -1,0 +1,21 @@
+{
+  "asrModel" : "parakeet-ultra",
+  "attendees" : [
+    "Priya Nair",
+    "Tom Becker",
+    "Lena Vogt"
+  ],
+  "endedAt" : "2026-11-10T09:35:00Z",
+  "folderName" : "2026-11-10 10-00 Product roadmap Q1",
+  "id" : "5B1F0C2E-7A41-4D3B-9C55-1A2B3C4D5E01",
+  "sourceApp" : "Google Meet",
+  "speakerNames" : {
+    "Speaker 1" : "Priya Nair",
+    "Speaker 2" : "Tom Becker",
+    "Speaker 3" : "Lena Vogt"
+  },
+  "startedAt" : "2026-11-10T09:00:00Z",
+  "status" : "done",
+  "summaryModel" : "claude-haiku-5-5",
+  "title" : "Product roadmap Q1"
+}

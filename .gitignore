@@ -1,0 +1,10 @@
+.build/
+build/
+*.xcodeproj
+.swiftpm/
+.DS_Store
+bench/data/
+bench/out/
+.env
+dist/
+.claude/

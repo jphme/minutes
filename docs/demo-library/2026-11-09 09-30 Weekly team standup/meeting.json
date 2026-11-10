@@ -1,0 +1,21 @@
+{
+  "asrModel" : "parakeet-ultra",
+  "attendees" : [
+    "Priya Nair",
+    "Tom Becker",
+    "Lena Vogt"
+  ],
+  "endedAt" : "2026-11-09T08:45:00Z",
+  "folderName" : "2026-11-09 09-30 Weekly team standup",
+  "id" : "5B1F0C2E-7A41-4D3B-9C55-1A2B3C4D5E03",
+  "sourceApp" : "Microsoft Teams",
+  "speakerNames" : {
+    "Speaker 1" : "Priya Nair",
+    "Speaker 2" : "Tom Becker",
+    "Speaker 3" : "Lena Vogt"
+  },
+  "startedAt" : "2026-11-09T08:30:00Z",
+  "status" : "done",
+  "summaryModel" : "claude-haiku-5-5",
+  "title" : "Weekly team standup"
+}

@@ -1,0 +1,21 @@
+[
+{"channel":"me","end":6.0,"id":"30000001-AAAA-4BBB-8CCC-000000000001","isFinal":true,"speaker":"Me","start":0,"text":"Morning everyone. Quick round: what did you finish last week, what's on for this week, anything blocking? Priya, start us off."},
+{"channel":"them","end":20.0,"id":"30000001-AAAA-4BBB-8CCC-000000000002","isFinal":true,"speaker":"Speaker 1","start":6.8,"text":"Last week I finished the query cache. Median dashboard load time dropped from four seconds to just under one and a half."},
+{"channel":"them","end":30.0,"id":"30000001-AAAA-4BBB-8CCC-000000000003","isFinal":true,"speaker":"Speaker 1","start":20.5,"text":"This week I'm starting the scheduler for the report exports. No blockers, but I need a review on the cache invalidation PR."},
+{"channel":"me","end":35.0,"id":"30000001-AAAA-4BBB-8CCC-000000000004","isFinal":true,"speaker":"Me","start":30.8,"text":"I'll look at the PR this morning. Tom?"},
+{"channel":"them","end":50.0,"id":"30000001-AAAA-4BBB-8CCC-000000000005","isFinal":true,"speaker":"Speaker 2","start":35.5,"text":"I finished the new onboarding screens and tested them with three users. Two of them got stuck on the data source step, so I'm reworking the wording."},
+{"channel":"them","end":58.0,"id":"30000001-AAAA-4BBB-8CCC-000000000006","isFinal":true,"speaker":"Speaker 2","start":50.6,"text":"Blocker: I still don't have the final copy for the empty states."},
+{"channel":"me","end":64.0,"id":"30000001-AAAA-4BBB-8CCC-000000000007","isFinal":true,"speaker":"Me","start":58.8,"text":"I'll write the empty state copy today and send it to you by lunch."},
+{"channel":"them","end":70.0,"id":"30000001-AAAA-4BBB-8CCC-000000000008","isFinal":true,"speaker":"Speaker 2","start":64.6,"text":"Thanks, that unblocks me."},
+{"channel":"them","end":88.0,"id":"30000001-AAAA-4BBB-8CCC-000000000009","isFinal":true,"speaker":"Speaker 3","start":70.8,"text":"I analysed last month's churn. Most cancellations are small accounts that never connected a second data source. I'll turn that into a short report for Thursday."},
+{"channel":"them","end":98.0,"id":"30000001-AAAA-4BBB-8CCC-000000000010","isFinal":true,"speaker":"Speaker 3","start":88.6,"text":"Also, the Contoso renewal call is tomorrow at half past two, I'd like to prepare a usage summary for it."},
+{"channel":"me","end":108.0,"id":"30000001-AAAA-4BBB-8CCC-000000000011","isFinal":true,"speaker":"Me","start":99.0,"text":"Good, that fits well. I'm interviewing Contoso tomorrow, so please send me the usage numbers by tonight."},
+{"channel":"them","end":113.0,"id":"30000001-AAAA-4BBB-8CCC-000000000012","isFinal":true,"speaker":"Speaker 3","start":108.8,"text":"Will do."},
+{"channel":"me","end":128.0,"id":"30000001-AAAA-4BBB-8CCC-000000000013","isFinal":true,"speaker":"Me","start":114.0,"text":"From me: roadmap workshop tomorrow at ten, please read the draft before. I'm also closing the Q4 hiring plan. We have one open engineering position."},
+{"channel":"them","end":138.0,"id":"30000001-AAAA-4BBB-8CCC-000000000014","isFinal":true,"speaker":"Speaker 1","start":128.8,"text":"On that, the staging environment was down on Friday evening for two hours. Does anyone know why?"},
+{"channel":"them","end":150.0,"id":"30000001-AAAA-4BBB-8CCC-000000000015","isFinal":true,"speaker":"Speaker 2","start":139.0,"text":"I think that was me, I ran the migration script against staging by accident. Sorry about that."},
+{"channel":"me","end":160.0,"id":"30000001-AAAA-4BBB-8CCC-000000000016","isFinal":true,"speaker":"Me","start":150.8,"text":"No problem, but let's add a confirmation prompt to that script so it can't happen again. Priya, can you do that?"},
+{"channel":"them","end":166.0,"id":"30000001-AAAA-4BBB-8CCC-000000000017","isFinal":true,"speaker":"Speaker 1","start":160.6,"text":"Sure, it's a small change."},
+{"channel":"me","end":175.0,"id":"30000001-AAAA-4BBB-8CCC-000000000018","isFinal":true,"speaker":"Me","start":167.0,"text":"Anything else? Otherwise we are done. Thanks, and see you tomorrow at ten."},
+{"channel":"them","end":180.0,"id":"30000001-AAAA-4BBB-8CCC-000000000019","isFinal":true,"speaker":"Speaker 3","start":175.8,"text":"All good. Bye."}
+]
