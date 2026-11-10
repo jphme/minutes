@@ -26,7 +26,14 @@ ln -s /Applications "$STAGE/Applications"
 mkdir -p dist
 DMG="dist/Minutes-$VERSION.dmg"
 rm -f "$DMG"
-hdiutil create -quiet -volname "Minutes $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG"
+# hdiutil fails now and then with "Resource busy", above all on CI runners; retry a few times.
+for attempt in 1 2 3 4 5; do
+  if hdiutil create -volname "Minutes $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG"; then break; fi
+  [ "$attempt" = 5 ] && { echo "hdiutil create failed 5 times" >&2; exit 1; }
+  echo "hdiutil create failed (attempt $attempt), retrying" >&2
+  rm -f "$DMG"
+  sleep $((attempt * 5))
+done
 
 if [[ "$MINUTES_SIGN_IDENTITY" == "Developer ID Application"* ]]; then
   codesign --force --timestamp --sign "$MINUTES_SIGN_IDENTITY" "$DMG"
