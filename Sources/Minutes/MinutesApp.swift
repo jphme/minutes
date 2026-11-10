@@ -36,6 +36,9 @@ struct MinutesApp: App {
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Minutes") { AppInfo.showAbout() }
+            }
             CommandGroup(replacing: .newItem) {
                 Button(model.isRecording ? "Stop Recording" : "Start Recording") {
                     Task { await model.toggleRecording() }
@@ -112,6 +115,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+}
+
+/// Version and project link, for Settings and the About window.
+@MainActor
+enum AppInfo {
+    static let repository = URL(string: "https://github.com/jphme/minutes")!
+    static var releases: URL { repository.appendingPathComponent("releases") }
+
+    static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
+    /// The git commit the app was built from (set by scripts/build-app.sh).
+    static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "" }
+    static var versionText: String { build.isEmpty ? version : "\(version) (\(build))" }
+
+    static func showAbout() {
+        let credits = NSMutableAttributedString(
+            string: "Local meeting transcription with notes by Claude.\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
+        credits.append(
+            NSAttributedString(
+                string: "github.com/jphme/minutes",
+                attributes: [.font: NSFont.systemFont(ofSize: 11), .link: repository]))
+        let centered = NSMutableParagraphStyle()
+        centered.alignment = .center
+        credits.addAttribute(.paragraphStyle, value: centered, range: NSRange(location: 0, length: credits.length))
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
     }
 }
 

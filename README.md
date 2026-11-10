@@ -35,7 +35,14 @@ Requires macOS 15 or later on a Mac with Apple Silicon (M1 or newer).
    Or, in Terminal, once: `xattr -dr com.apple.quarantine /Applications/Minutes.app`
 4. Allow **Microphone**, **System Audio Recording** and **Calendar** access when asked.
 
-After an update macOS asks for these permissions again, because each release has a new ad-hoc signature.
+After an update macOS asks for these permissions again, because each release has a new ad-hoc signature, and asks
+once whether Minutes may read its API key from the keychain (click Always Allow). Settings shows the installed
+version at the bottom of every tab, with a link to new versions.
+
+**Updating** (also to switch from a self-built copy): quit Minutes (power button in the menu bar window), delete the
+old app (`/Applications/Minutes.app`, or `~/Applications/Minutes.app` for a copy built with `scripts/build-app.sh`), and
+install the new DMG as above. Meetings, day notes and settings are kept: they live in your library folder and in
+`~/Library/Application Support/Minutes/`, not in the app.
 
 **Build from source** (needs the Xcode Command Line Tools: `xcode-select --install`; full Xcode is not needed):
 

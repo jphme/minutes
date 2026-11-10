@@ -5,14 +5,35 @@ struct SettingsView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            ContextSettings().tabItem { Label("Background", systemImage: "person.text.rectangle") }
-            SummarySettings().tabItem { Label("Notes", systemImage: "sparkles") }
-            SyncSettings().tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
+        VStack(spacing: 0) {
+            TabView {
+                GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
+                ContextSettings().tabItem { Label("Background", systemImage: "person.text.rectangle") }
+                SummarySettings().tabItem { Label("Notes", systemImage: "sparkles") }
+                SyncSettings().tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
+            }
+            Divider()
+            VersionFooter()
         }
         .environmentObject(model)
-        .frame(width: 640, height: 600)
+        .frame(width: 640, height: 630)
+    }
+}
+
+/// Version and links, visible on every Settings tab.
+struct VersionFooter: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            Text("Minutes \(AppInfo.versionText)").textSelection(.enabled).foregroundStyle(.secondary)
+                .help("Version and the git commit it was built from")
+            Spacer()
+            Link("New versions", destination: AppInfo.releases)
+            Link("GitHub", destination: AppInfo.repository)
+            Button("About…") { AppInfo.showAbout() }.buttonStyle(.link)
+        }
+        .font(.callout)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 

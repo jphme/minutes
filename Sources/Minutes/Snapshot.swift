@@ -61,6 +61,7 @@ enum Snapshot {
         let tabs: [(String, AnyView)] = [
             ("general", AnyView(GeneralSettings())), ("background", AnyView(ContextSettings())),
             ("notes", AnyView(SummarySettings())), ("sync", AnyView(SyncSettings())),
+            ("window", AnyView(SettingsView())),
         ]
         for (name, view) in tabs {
             render(view.environmentObject(model).environmentObject(passive), size: NSSize(width: 640, height: 760), to: directory.appendingPathComponent("settings-\(name).png"))
