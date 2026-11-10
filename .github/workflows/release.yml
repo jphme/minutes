@@ -26,17 +26,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show toolchain
+      # The newest installed Xcode (a preview if that is the newest): the app is developed against the latest macOS
+      # SDK, and SwiftUI renders differently with an older one (a release built with the macOS 26 SDK drew the
+      # selected sidebar row as a black bar).
+      - name: Select the newest Xcode
+        id: xcode
         run: |
+          ls -d /Applications/Xcode_*.app
+          XCODE=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
           xcode-select -p
           swift --version
+          xcrun --show-sdk-version
+          echo "name=$(basename "$XCODE" .app)" >> "$GITHUB_OUTPUT"
 
+      # Build products only fit the compiler that made them, so the key includes the Xcode version.
       - name: Cache Swift packages and build products
         uses: actions/cache@v4
         with:
           path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          key: spm-${{ steps.xcode.outputs.name }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: spm-${{ steps.xcode.outputs.name }}-
 
       - name: Read version
         id: version
@@ -65,10 +75,25 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
           vtool -show-build "$APP/Contents/MacOS/Minutes" | grep -E 'minos|sdk'
 
+      # Offscreen renders of every screen from the fictional demo library, plus the layout checks it prints.
+      - name: Render screenshots
+        run: |
+          mkdir -p "$RUNNER_TEMP/support"
+          printf '{"libraryPath": "%s/docs/demo-library", "useCalendar": false}\n' "$PWD" > "$RUNNER_TEMP/support/settings.json"
+          MINUTES_SUPPORT_DIR="$RUNNER_TEMP/support" build/Minutes.app/Contents/MacOS/Minutes --snapshot "$RUNNER_TEMP/shots" | tee "$RUNNER_TEMP/shots/checks.txt"
+          ! grep -q FAILED "$RUNNER_TEMP/shots/checks.txt"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Minutes-${{ steps.version.outputs.version }}-${{ github.sha }}
           path: dist/*.dmg
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-${{ github.sha }}
+          path: ${{ runner.temp }}/shots
           retention-days: 30
 
       - name: Publish release
