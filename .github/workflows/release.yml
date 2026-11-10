@@ -20,15 +20,14 @@ concurrency:
 
 jobs:
   build:
-    # Apple Silicon runner; the app is arm64-only like its speech models.
-    runs-on: macos-26
+    # Xcode 27 image (macOS 27, Apple Silicon; the app is arm64-only). The app is developed against the macOS 27 SDK;
+    # built with the macOS 26 SDK (runner macos-26), SwiftUI drew the selected sidebar row as a black bar.
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
-      # The newest installed Xcode (a preview if that is the newest): the app is developed against the latest macOS
-      # SDK, and SwiftUI renders differently with an older one (a release built with the macOS 26 SDK drew the
-      # selected sidebar row as a black bar).
+      # The newest Xcode installed on the image.
       - name: Select the newest Xcode
         id: xcode
         run: |
@@ -78,7 +77,7 @@ jobs:
       # Offscreen renders of every screen from the fictional demo library, plus the layout checks it prints.
       - name: Render screenshots
         run: |
-          mkdir -p "$RUNNER_TEMP/support"
+          mkdir -p "$RUNNER_TEMP/support" "$RUNNER_TEMP/shots"
           printf '{"libraryPath": "%s/docs/demo-library", "useCalendar": false}\n' "$PWD" > "$RUNNER_TEMP/support/settings.json"
           MINUTES_SUPPORT_DIR="$RUNNER_TEMP/support" build/Minutes.app/Contents/MacOS/Minutes --snapshot "$RUNNER_TEMP/shots" | tee "$RUNNER_TEMP/shots/checks.txt"
           ! grep -q FAILED "$RUNNER_TEMP/shots/checks.txt"
