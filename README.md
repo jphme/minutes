@@ -211,7 +211,6 @@ swift build -c release                      # app + CLI
 .build/release/minutes-cli delete --meeting "<folder>"
 build/Minutes.app/Contents/MacOS/Minutes --snapshot /tmp/snap   # render the UI to PNGs
 open -n -a ~/Applications/Minutes.app --args --calendar-report /tmp/cal.txt 2   # calendars and events the app sees
-scripts/make-release.sh 0.2.0               # dist/Minutes-0.2.0.dmg (see the script for Developer ID notarization)
 .build/release/minutes-cli passive --seconds 120 --library /tmp/lib --digest   # passive capture + CPU/ANE stats
 .build/release/minutes-cli passive --seconds 75 --library /tmp/lib --me-file me.wav --them-file them.wav --preview   # the same from files, nothing audible
 .build/release/minutes-cli digest --library /tmp/lib --day 2026-11-09 [--reset] [--final]   # digest / day summary
@@ -226,6 +225,23 @@ scripts/make-release.sh 0.2.0               # dist/Minutes-0.2.0.dmg (see the sc
   `<lang>_0000.wav`… and `<lang>.trans.txt`) into `bench/data/fleurs/<lang>/`, then
   `minutes-cli transcribe --model <m> --jsonl bench/out/<m>.<lang>.jsonl bench/data/fleurs/<lang>/*.wav` and
   `bench/wer.py bench/out/*.jsonl`.
+
+## Releases
+
+GitHub Actions builds the DMG on every push to `main` ([workflow](.github/workflows/release.yml), Apple Silicon
+runner, ad-hoc signature). To publish a release, raise `CFBundleShortVersionString` in `Resources/Info.plist` and push:
+when no release `v<version>` exists yet, the workflow creates it with the DMG and install notes attached. Other pushes
+keep the DMG as a workflow artifact for 30 days.
+
+To build a release on your own Mac instead (Command Line Tools are enough):
+
+```bash
+scripts/make-release.sh 0.1.0                # dist/Minutes-0.1.0.dmg, signed ad hoc
+gh release create v0.1.0 dist/Minutes-0.1.0.dmg --title "Minutes 0.1.0" --notes "…"
+```
+
+With an Apple Developer ID, set `MINUTES_SIGN_IDENTITY` and `NOTARY_PROFILE` (see `scripts/make-release.sh`) to get a
+notarized DMG that opens without the Privacy & Security step.
 
 ## License
 

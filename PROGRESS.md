@@ -30,10 +30,9 @@ Not yet verified by a human:
 
 ## Next steps, roughly in order
 
-1. First release: the repository is public (github.com/jphme/minutes, since 2026-11-10); publish a first DMG
-   (`scripts/make-release.sh`, ad-hoc signed; no Developer ID for now, so users approve the first launch under
-   Privacy & Security) as a GitHub release, which the README's install steps link to. Name stays "Minutes", bundle
-   identifier `me.jph.minutes`.
+1. Releases are built by GitHub Actions (README → Releases; ad-hoc signed, no Developer ID for now). Not yet verified
+   by a human: the released DMG installed on another Mac (Gatekeeper "Open Anyway" flow, permissions, model download).
+   Name stays "Minutes", bundle identifier `me.jph.minutes`.
 2. First-run onboarding window (permissions, API key, background), launch at login (SMAppService).
 3. Real-call test with speakers instead of headphones; check echo removal (`FinalTranscriber.removeEcho`). If speaker use is common, add FluidAudio's LocalVQE echo cancellation on the mic using the tap as reference.
 4. Speaker recognition across meetings: match new speakers against named ones in earlier meetings' `speakers.json` (`SpeakerMatcher` already does this within a meeting).

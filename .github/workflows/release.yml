@@ -1,0 +1,98 @@
+# Builds the DMG on every push to main. When the version in Resources/Info.plist (CFBundleShortVersionString) has
+# no GitHub release yet, it publishes one (tag v<version>) with the DMG attached; otherwise the DMG is only kept as a
+# workflow artifact. To release: bump the version in Resources/Info.plist and push to main.
+#
+# The app is signed ad hoc (no Apple Developer ID), so users approve the first launch under
+# System Settings → Privacy & Security (see the README).
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Apple Silicon runner; the app is arm64-only like its speech models.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcode-select -p
+          swift --version
+
+      - name: Cache Swift packages and build products
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Read version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION exists; building without publishing."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build DMG
+        env:
+          MINUTES_SIGN_IDENTITY: "-"
+        run: scripts/make-release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Check the app bundle
+        run: |
+          APP=build/Minutes.app
+          codesign --verify --strict --verbose=2 "$APP"
+          lipo -archs "$APP/Contents/MacOS/Minutes"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
+          vtool -show-build "$APP/Contents/MacOS/Minutes" | grep -E 'minos|sdk'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Minutes-${{ steps.version.outputs.version }}-${{ github.sha }}
+          path: dist/*.dmg
+          retention-days: 30
+
+      - name: Publish release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          DMG="dist/Minutes-$VERSION.dmg"
+          SHA=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
+          cat > notes.md <<EOF
+          Minutes $VERSION for Macs with Apple Silicon (M1 or newer), macOS 15 or later.
+
+          **Install**
+          1. Download \`Minutes-$VERSION.dmg\` below, open it and drag **Minutes** to Applications.
+          2. Open Minutes. macOS says "Apple could not verify Minutes" because the app is not notarized. Click **Done**.
+          3. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to Minutes, then
+             confirm. Or run once in Terminal: \`xattr -dr com.apple.quarantine /Applications/Minutes.app\`
+          4. Allow Microphone, System Audio Recording and Calendar access when asked. The speech models (about
+             0.7 GB) download on first launch.
+
+          After an update macOS asks for the permissions again (each build has a new ad-hoc signature).
+
+          Built by GitHub Actions from commit ${GITHUB_SHA}.
+          SHA-256: \`$SHA\`
+          EOF
+          gh release create "v$VERSION" "$DMG" --title "Minutes $VERSION" --notes-file notes.md --target "$GITHUB_SHA"
