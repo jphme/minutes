@@ -67,6 +67,14 @@ public actor MeetingProcessor {
         await asr.configureVocabulary(file: AppPaths.vocabulary)
 
         var parts = m.allParts
+        if m.isProtected {
+            // Data Protection switched on during the recording: system audio from before the switch is deleted unheard.
+            for i in parts.indices {
+                for ext in ["caf", "wav", "m4a"] {
+                    try? FileManager.default.removeItem(at: store.file("\(MeetingStore.audioBaseName(.them, part: i)).\(ext)", for: m))
+                }
+            }
+        }
         let existing = store.loadFinalTranscript(for: m) ?? []
         var embeddings = store.loadSpeakerEmbeddings(for: m)
         var segments: [TranscriptSegment] = []
@@ -101,6 +109,7 @@ public actor MeetingProcessor {
             }
             parts[i].transcribed = true
         }
+        if m.isProtected { segments.removeAll { $0.channel == .them } }
         segments.sort { $0.start < $1.start }
         if m.parts != nil { m.parts = parts }
         try store.saveTranscript(segments, for: m)

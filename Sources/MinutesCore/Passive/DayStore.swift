@@ -8,6 +8,10 @@ public struct DayEntry: Codable, Sendable, Identifiable, Equatable {
         case speech
         /// A meeting recording ran (passive capture was paused); `text` is its title.
         case meeting
+        /// Data Protection switched on (`text` "on") or off ("off"): from here on only the microphone is
+        /// transcribed, or both sources again. Kept in the transcript so the notes model knows where the other
+        /// side of a conversation is missing.
+        case dataProtection
     }
 
     public var id: UUID
@@ -38,6 +42,15 @@ public struct DayEntry: Codable, Sendable, Identifiable, Equatable {
 
     /// Label in transcripts and prompts: "Mic" for the microphone, "Mac" for sound the computer played.
     public var source: String { channel == .them ? "Mac" : "Mic" }
+
+    public static func dataProtection(_ on: Bool, at date: Date = Date()) -> DayEntry {
+        DayEntry(kind: .dataProtection, start: date, end: date, text: on ? "on" : "off")
+    }
+
+    /// Whether Data Protection was on at the end of these entries (or before `date`): the state of the last marker.
+    public static func protectionActive(_ entries: [DayEntry], before date: Date = .distantFuture) -> Bool {
+        entries.filter { $0.kind == .dataProtection && $0.start < date }.max { $0.start < $1.start }?.text == "on"
+    }
 }
 
 /// Bookkeeping for a day: how far the digest has read, and what the summaries cost.
@@ -53,6 +66,8 @@ public struct DayState: Codable, Sendable, Equatable {
     public var lastError: String?
     /// Bumped when entries are forgotten, so a digest update that read them in the meantime is discarded.
     public var generation = 0
+    /// Data Protection chosen for this day in its toolbar; nil follows the setting.
+    public var dataProtection: Bool?
 
     public init() {}
 
@@ -68,6 +83,7 @@ public struct DayState: Codable, Sendable, Equatable {
         costUSD = (try? c.decode(Double.self, forKey: .costUSD)) ?? d.costUSD
         lastError = try? c.decode(String.self, forKey: .lastError)
         generation = (try? c.decode(Int.self, forKey: .generation)) ?? d.generation
+        dataProtection = try? c.decode(Bool.self, forKey: .dataProtection)
     }
 }
 
@@ -188,10 +204,12 @@ public final class DayStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let all = entriesUnlocked(day)
-        let kept = all.filter { $0.end <= date }
+        // Data Protection markers stay: they record what was captured, not what was said.
+        func removed(_ e: DayEntry) -> Bool { e.end > date && e.kind != .dataProtection }
+        let kept = all.filter { !removed($0) }
         guard kept.count < all.count else { return 0 }
         // Lines are in arrival order, not time order (mic lines arrive late), so check positions, not counts.
-        let firstRemoved = all.firstIndex { $0.end > date } ?? all.count
+        let firstRemoved = all.firstIndex(where: removed) ?? all.count
         do {
             let jsonl = try kept.map { String(decoding: try Self.encoder.encode($0), as: UTF8.self) }.joined(separator: "\n")
             try (jsonl.isEmpty ? "" : jsonl + "\n").write(to: file("transcript.jsonl", day: day), atomically: true, encoding: .utf8)
@@ -223,7 +241,7 @@ public final class DayStore: @unchecked Sendable {
         try fm.trashItem(at: folder(day), resultingItemURL: nil)
     }
 
-    static func markdownHeader(_ day: String) -> String {
+    public static func markdownHeader(_ day: String) -> String {
         "# Passive transcript \(day)\n\nMic = microphone, Mac = sound the computer played.\n\n"
     }
 
@@ -231,7 +249,13 @@ public final class DayStore: @unchecked Sendable {
         switch entry.kind {
         case .speech: return "[\(clock(entry.start))] \(entry.source): \(entry.text)\n"
         case .meeting: return "\n— Meeting recorded separately: \(entry.text) (\(clock(entry.start, seconds: false))–\(clock(entry.end, seconds: false))) —\n\n"
+        case .dataProtection: return "\n— \(protectionText(entry.text == "on")) (\(clock(entry.start, seconds: false))) —\n\n"
         }
+    }
+
+    public static func protectionText(_ on: Bool) -> String {
+        on ? "Data Protection on: only the microphone is transcribed from here"
+            : "Data Protection off: sound the Mac plays is transcribed again"
     }
 
     public static func clock(_ date: Date, seconds: Bool = true) -> String {

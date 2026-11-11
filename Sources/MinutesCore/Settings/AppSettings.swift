@@ -45,6 +45,9 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var passiveBatteryThreshold = 20
     /// Pause passive mode while the screen is locked (the user is away; only bystanders would be recorded).
     public var passivePauseWhenLocked = true
+    /// Data Protection: transcribe only the microphone, never what the Mac plays (the other side of calls). The
+    /// default for new meetings and passive days; each meeting and day can override it from its toolbar.
+    public var dataProtection = false
 
     public init() {}
 
@@ -69,6 +72,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
         passiveMode = (try? c.decode(Bool.self, forKey: .passiveMode)) ?? d.passiveMode
         passiveBatteryThreshold = (try? c.decode(Int.self, forKey: .passiveBatteryThreshold)) ?? d.passiveBatteryThreshold
         passivePauseWhenLocked = (try? c.decode(Bool.self, forKey: .passivePauseWhenLocked)) ?? d.passivePauseWhenLocked
+        dataProtection = (try? c.decode(Bool.self, forKey: .dataProtection)) ?? d.dataProtection
     }
 }
 

@@ -75,6 +75,23 @@ public struct Summarizer: Sendable {
         - Unresolved points or things to follow up on.
         """
 
+    /// Appended to the instructions (also to a custom prompt) when a meeting was recorded with Data Protection.
+    public static let dataProtectionInstructions = """
+        Additional rules for this meeting (they change how you read the transcript, not the output structure):
+        It was recorded in Data Protection mode: only the user's microphone was transcribed. What the \
+        other participants said through the computer was deliberately not recorded, so the transcript holds one \
+        side of the conversation: the user, and anyone speaking in the same room. Write the notes from that side:
+        - Infer what the others said, asked or proposed from the user's replies and the context, but only where \
+        the user's side makes it clear, and phrase it as inferred ("Anna apparently asked about …, and the user \
+        agreed to …"). Say once, in the summary, that the notes rest on the user's side only; do not repeat it in \
+        every bullet and do not add a section about it.
+        - Never invent statements, numbers, decisions or commitments of the other participants. What they \
+        committed to is known only when the user repeats or confirms it; otherwise list it under open questions.
+        - Tasks the user took on are certain; tasks for others only when the user stated them.
+        - Do not try to name remote speakers: they are not in the transcript. "Speaker 1", "Speaker 2" … are \
+        people in the room with the user.
+        """
+
     /// Background block for the prompt: the user's name and role from Settings plus the free-form context file.
     public static func background(settings: AppSettings) -> String {
         var lines: [String] = []
@@ -113,7 +130,11 @@ public struct Summarizer: Sendable {
         let headings = language == "German"
             ? ["Zusammenfassung", "Entscheidungen", "Aufgaben", "Offene Fragen"]
             : ["Summary", "Decisions", "Action items", "Open questions"]
-        let system = instructions()
+        var instructions = instructions()
+        if input.meeting.isProtected {
+            instructions += "\n\n" + dataProtectionInstructions
+        }
+        let system = instructions
             .replacingOccurrences(of: "{LANGUAGE}", with: language)
             .replacingOccurrences(of: "{H_SUMMARY}", with: headings[0])
             .replacingOccurrences(of: "{H_DECISIONS}", with: headings[1])
@@ -127,6 +148,7 @@ public struct Summarizer: Sendable {
             user += "Title: \(m.title)\n"
         }
         user += "Date: \(MeetingStore.humanDate(m.startedAt))\n"
+        if m.isProtected { user += "Recorded with Data Protection: microphone only, the other participants are not in the transcript.\n" }
         if let d = m.duration { user += "Duration: \(Int(d / 60)) minutes\n" }
         if let app = m.sourceApp { user += "App: \(app)\n" }
         if !m.attendees.isEmpty { user += "Attendees (from calendar): \(m.attendees.joined(separator: ", "))\n" }

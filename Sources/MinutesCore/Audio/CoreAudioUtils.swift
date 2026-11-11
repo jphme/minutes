@@ -71,6 +71,20 @@ enum CoreAudioUtils {
         return property(device, kAudioDevicePropertyBufferFrameSize, default: UInt32(0))
     }
 
+    /// True when the default output is the Mac's own speakers or a display's speakers, so the microphone hears
+    /// what the Mac plays. Headphones on the built-in jack, USB and Bluetooth devices count as headphones.
+    static var outputIsSpeaker: Bool {
+        guard let device = defaultOutputDevice, device != 0 else { return false }
+        let transport = property(device, kAudioDevicePropertyTransportType, default: UInt32(0)) ?? 0
+        if transport == kAudioDeviceTransportTypeHDMI || transport == kAudioDeviceTransportTypeDisplayPort { return true }
+        guard transport == kAudioDeviceTransportTypeBuiltIn else { return false }
+        var addr = address(kAudioDevicePropertyDataSource, scope: kAudioDevicePropertyScopeOutput)
+        var source: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &source) == noErr else { return true }
+        return source != 0x6864_706E  // 'hdpn': headphones plugged into the jack
+    }
+
     static func isBluetooth(_ device: AudioObjectID) -> Bool {
         let transport = property(device, kAudioDevicePropertyTransportType, default: UInt32(0)) ?? 0
         return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
@@ -157,4 +171,10 @@ enum HostTime {
     }
 
     static var now: UInt64 { mach_absolute_time() }
+}
+
+public enum AudioRoute {
+    /// The Mac plays through speakers the microphone can hear. With Data Protection on this matters: without system
+    /// audio there is no echo check, so the other side of a call would be transcribed from the microphone.
+    public static var playsThroughSpeakers: Bool { CoreAudioUtils.outputIsSpeaker }
 }

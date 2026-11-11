@@ -117,7 +117,12 @@ public final class RecordingSession: @unchecked Sendable {
     /// Seconds from the meeting start to this part's start; live segments are shifted onto the meeting timeline.
     public let timeOffset: Double
     private let store: MeetingStore
-    private let system = SystemAudioCapture()
+    /// Replaced by a fresh instance when system audio is switched back on: the old one may still be tearing down.
+    private var system = SystemAudioCapture()
+    /// False with Data Protection: the process tap does not run, so the other participants are never captured.
+    public private(set) var capturesSystemAudio: Bool
+    private var themSink: AudioSink?
+    private var systemStartedAt = Date()
     private let microphone = MicrophoneCapture()
     private var pipelines: [Channel: ChannelPipeline] = [:]
     private let onSegment: @Sendable (TranscriptSegment) -> Void
@@ -137,6 +142,27 @@ public final class RecordingSession: @unchecked Sendable {
         self.timeOffset = timeOffset
         self.store = store
         self.onSegment = onSegment
+        capturesSystemAudio = !meeting.isProtected
+    }
+
+    /// Data Protection switched during the recording: stops or restarts system-audio capture. Call on the main thread.
+    public func setSystemAudio(_ on: Bool) {
+        guard on != capturesSystemAudio, let sink = themSink else { return }
+        capturesSystemAudio = on
+        if on {
+            system = SystemAudioCapture()
+            systemStartedAt = Date()
+            do {
+                try system.start(sink: sink)
+            } catch {
+                warn("System audio unavailable: \(error.localizedDescription)")
+            }
+        } else {
+            system.detach()
+            let old = system
+            DispatchQueue.global(qos: .utility).async { old.stop() }
+        }
+        log.info("system audio \(on ? "on" : "off (Data Protection)")")
     }
 
     /// Starts both captures. Live transcription is skipped when `asr`/`vad` are nil (e.g. models still downloading).
@@ -183,13 +209,17 @@ public final class RecordingSession: @unchecked Sendable {
             warn(Self.micDenied)
         }
         let themPipeline = pipelines[.them]!
-        do {
-            try system.start { samples, host in themPipeline.receive(samples, hostTime: host) }
-        } catch {
-            warnings.append("System audio unavailable: \(error.localizedDescription)")
+        let themSink: AudioSink = { samples, host in themPipeline.receive(samples, hostTime: host) }
+        self.themSink = themSink
+        if capturesSystemAudio {
+            do {
+                try system.start(sink: themSink)
+            } catch {
+                warnings.append("System audio unavailable: \(error.localizedDescription)")
+            }
         }
         startWatchdog()
-        log.info("recording started: \(self.meeting.folderName)")
+        log.info("recording started: \(self.meeting.folderName)\(self.capturesSystemAudio ? "" : " (Data Protection: microphone only)")")
     }
 
     /// The process tap can silently stop delivering buffers after sleep or route changes; rebuild it if so.
@@ -198,7 +228,7 @@ public final class RecordingSession: @unchecked Sendable {
             self.watchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 let last = self.system.lastBufferHostTime
-                if last > 0, HostTime.seconds(HostTime.now &- last) > 5 {
+                if self.capturesSystemAudio, last > 0, HostTime.seconds(HostTime.now &- last) > 5 {
                     log.warning("system audio stalled, restarting tap")
                     self.system.restart()
                 }
@@ -217,7 +247,9 @@ public final class RecordingSession: @unchecked Sendable {
         let othersPlaying = CoreAudioUtils.processObjects.contains {
             CoreAudioUtils.processPID($0) != getpid() && CoreAudioUtils.processIsRunningOutput($0)
         }
-        if age > 20, system.lastAudibleHostTime == 0, othersPlaying, !warnedSilence.contains(.them) {
+        if capturesSystemAudio, Date().timeIntervalSince(systemStartedAt) > 20, system.lastAudibleHostTime == 0, othersPlaying,
+            !warnedSilence.contains(.them)
+        {
             warnedSilence.insert(.them)
             warn("System audio is silent although apps are playing sound. Allow Minutes under System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only.")
         }

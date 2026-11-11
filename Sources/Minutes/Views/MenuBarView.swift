@@ -104,7 +104,7 @@ struct MenuBarView: View {
             Spacer()
             if model.isRecording {
                 LevelMeter(level: model.levels.me, label: "Me")
-                LevelMeter(level: model.levels.them, label: "Them")
+                ThemMeterOrShield()
             }
         }
     }
@@ -231,6 +231,67 @@ struct LevelMeter: View {
                 }
             }
             .frame(width: 36, height: 5)
+        }
+    }
+}
+
+/// The "Them" level meter, or a shield while the recording runs in Data Protection mode (no system audio).
+struct ThemMeterOrShield: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        if model.recordingIsProtected {
+            Label("Mic only", systemImage: "lock.shield.fill")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .help("Data Protection: the other participants are not recorded")
+        } else {
+            LevelMeter(level: model.levels.them, label: "Them")
+        }
+    }
+}
+
+/// Data Protection switch in the toolbar of a meeting and of a day: the same control in both places.
+struct DataProtectionToggle: View {
+    let isOn: Bool
+    let enabled: Bool
+    let help: String
+    let set: (Bool) -> Void
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { isOn }, set: set)) {
+            Label("Data Protection", systemImage: isOn ? "lock.shield.fill" : "lock.shield")
+        }
+        .toggleStyle(.button)
+        .disabled(!enabled)
+        .help(help)
+    }
+
+    static let onHelp = "Data Protection is on: only your microphone is transcribed, never what your Mac plays."
+    static let offHelp = "Data Protection: transcribe only your microphone, not the other side of calls."
+}
+
+/// Header line while Data Protection is on: what it means, and a warning when the Mac plays through speakers
+/// (the microphone would then pick up the other side).
+struct DataProtectionNote: View {
+    var live: Bool
+    @Local private var speakers = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label("Data Protection: only your microphone", systemImage: "lock.shield.fill")
+            if live && speakers {
+                Label("Use headphones: the microphone hears your speakers", systemImage: "speaker.wave.2")
+                    .foregroundStyle(.orange)
+                    .help("Without system audio Minutes cannot remove speaker echo, so the other side would be transcribed from the microphone.")
+            }
+        }
+        .lineLimit(1)
+        .task(id: live) {
+            while live && !Task.isCancelled {
+                speakers = AudioRoute.playsThroughSpeakers
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
         }
     }
 }

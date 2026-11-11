@@ -70,6 +70,21 @@ enum Snapshot {
             render(
                 TranscriptView(meeting: meeting, live: false).environmentObject(model),
                 size: NSSize(width: 900, height: 700), to: directory.appendingPathComponent("transcript.png"))
+            // The same meeting as if recorded with Data Protection (header line, transcript without the others),
+            // and the toolbar switch in both states (offscreen windows have no toolbar).
+            var protected = meeting
+            protected.dataProtection = true
+            render(
+                MeetingDetailView(meeting: protected).environmentObject(model).environmentObject(passive),
+                size: NSSize(width: 900, height: 520), to: directory.appendingPathComponent("meeting-data-protection.png"))
+            render(
+                HStack(spacing: 16) {
+                    DataProtectionToggle(isOn: false, enabled: true, help: "") { _ in }
+                    DataProtectionToggle(isOn: true, enabled: true, help: "") { _ in }
+                    DataProtectionToggle(isOn: true, enabled: false, help: "") { _ in }
+                }
+                .padding(12),
+                size: NSSize(width: 520, height: 0), to: directory.appendingPathComponent("toggle-data-protection.png"))
         }
         exit(0)
     }

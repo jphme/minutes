@@ -28,6 +28,21 @@ Not yet verified by a human:
 - the meeting hand-off (passive pauses during a recording, marker in the day, resumes after),
 - the Bluetooth-headset rule (built-in mic used while AirPods are the default input).
 
+## Day notes in the notes repository
+
+Passive days are synced to `days/<year>/<date>/` (README → Sync). Verified by agent from the CLI against a local bare
+repository: fresh repository, upgrade of a repository with the old `.gitattributes` (rule added, day files pushed
+as git-crypt blobs), no-op second run, decryption in a fresh clone. Not yet verified by a human: the first launch
+against the real repository (catch-up of all past days) and the push after a digest update inside the app.
+
+## Data Protection mode
+
+Microphone-only transcription (README → Data Protection mode). Verified by agent: the post-meeting pipeline with a
+system track present (`minutes-cli process --data-protection`: track deleted unheard, transcript only "Me", notes
+from one side with inferred points marked), passive capture from files (`minutes-cli passive --data-protection`).
+Not yet verified by a human: the toolbar switch during a live recording (tap stopping and restarting), the
+passive restart when switching today's mode, the speakers warning, and notes quality on a real one-sided call.
+
 ## Next steps, roughly in order
 
 1. Releases are built by GitHub Actions (README → Releases; ad-hoc signed, no Developer ID for now). Not yet verified

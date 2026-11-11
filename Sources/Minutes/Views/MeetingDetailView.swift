@@ -40,6 +40,16 @@ struct MeetingDetailView: View {
         .onDisappear { flushNotes() }
         .toolbar {
             ToolbarItemGroup {
+                DataProtectionToggle(
+                    isOn: meeting.isProtected, enabled: isLive,
+                    help: isLive
+                        ? (meeting.isProtected
+                            ? DataProtectionToggle.onHelp + " Turn off to record the other participants from now on."
+                            : DataProtectionToggle.offHelp + " Turning it on also drops what was recorded of them so far.")
+                        : meeting.isProtected
+                            ? "Recorded with Data Protection: only your microphone was transcribed."
+                            : "Data Protection can be switched only while recording."
+                ) { model.setDataProtection($0, for: meeting) }
                 Button { copyNotes() } label: {
                     Label("Copy notes", systemImage: copied == "notes" ? "checkmark" : "doc.on.doc")
                 }
@@ -107,6 +117,9 @@ struct MeetingDetailView: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+            if meeting.isProtected {
+                DataProtectionNote(live: isLive).font(.callout).foregroundStyle(.secondary)
+            }
             if let stage = model.stageText[meeting.id] {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)

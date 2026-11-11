@@ -17,7 +17,13 @@ struct PassiveControl: View {
                     .foregroundStyle(passive.isListening ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Passive mode")
+                    HStack(spacing: 4) {
+                        Text("Passive mode")
+                        if passive.isEnabled && passive.protectedToday {
+                            Image(systemName: "lock.shield.fill").font(.caption).foregroundStyle(.secondary)
+                                .help("Data Protection: only the microphone is transcribed today")
+                        }
+                    }
                     Text(passive.statusText).font(.caption).foregroundStyle(statusColor).lineLimit(2)
                 }
                 Spacer()
@@ -135,6 +141,10 @@ struct DayView: View {
     private var isToday: Bool { day == passive.today }
     private var store: DayStore { passive.store }
     private var isBusy: Bool { passive.busy[day] != nil }
+    /// Today: the mode capture runs in. Another day: whether any part of it was transcribed in Data Protection mode.
+    private var isProtected: Bool {
+        isToday ? passive.protectedToday : entries.contains { $0.kind == .dataProtection && $0.text == "on" }
+    }
     private var entries: [DayEntry] {
         let all = isToday ? passive.todayEntries : store.entries(day)
         return all.sorted { $0.start < $1.start }
@@ -170,6 +180,14 @@ struct DayView: View {
         }
         .toolbar {
             ToolbarItemGroup {
+                DataProtectionToggle(
+                    isOn: isProtected, enabled: isToday && passive.isEnabled,
+                    help: !isToday
+                        ? (isProtected ? "Parts of this day were transcribed with Data Protection: microphone only." : "Data Protection can be switched only for today.")
+                        : !passive.isEnabled ? "Turn on passive mode to use Data Protection for today."
+                        : (isProtected ? DataProtectionToggle.onHelp : DataProtectionToggle.offHelp)
+                            + " Applies to today from now on; the default is in Settings."
+                ) { passive.setDataProtection($0) }
                 Button { copyNotes() } label: {
                     Label("Copy notes", systemImage: copied == "notes" ? "checkmark" : "doc.on.doc")
                 }
@@ -239,6 +257,9 @@ struct DayView: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+            if isToday && isProtected {
+                DataProtectionNote(live: passive.isListening).font(.callout).foregroundStyle(.secondary)
+            }
             if let busy = passive.busy[day] {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -342,8 +363,8 @@ struct DayView: View {
             all.sort { $0.start < $1.start }
         }
         return all.filter { line in
-            let isMeeting = line.entry?.kind == .meeting
-            if let channel, !isMeeting, line.channel != channel { return false }
+            let isMarker = line.entry.map { $0.kind != .speech } ?? false
+            if let channel, !isMarker, line.channel != channel { return false }
             return search.isEmpty || line.text.localizedCaseInsensitiveContains(search)
         }
     }
@@ -407,6 +428,14 @@ struct DayView: View {
     @ViewBuilder private func row(_ line: Line) -> some View {
         if let entry = line.entry, entry.kind == .meeting {
             meetingRow(entry)
+        } else if let entry = line.entry, entry.kind == .dataProtection {
+            HStack(spacing: 8) {
+                Image(systemName: entry.text == "on" ? "lock.shield.fill" : "lock.open")
+                Text("\(DayStore.clock(entry.start, seconds: false))  \(DayStore.protectionText(entry.text == "on"))")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 70)
         } else {
             TranscriptRow(
                 time: DayStore.clock(line.start), timeWidth: 60, speaker: line.channel == .them ? "Mac" : "Mic",

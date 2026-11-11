@@ -55,6 +55,8 @@ final class AppModel: ObservableObject {
     private var calendarTimer: Timer?
     private var syncPending: Set<UUID> = []
     private var syncRemoved: Set<UUID> = []
+    private var syncDays: Set<String> = []
+    private var syncRemovedDays: Set<String> = []
     private var syncTask: Task<Void, Never>?
 
     private init() {
@@ -78,6 +80,7 @@ final class AppModel: ObservableObject {
             PassiveModel.shared.launch()
         }
         Task { await primePermissions() }
+        syncAll()
         if settings.useCalendar {
             Task {
                 if await calendar.requestAccess() {
@@ -290,7 +293,8 @@ final class AppModel: ObservableObject {
         if let session = recording, session.meeting.id == meeting.id {
             // After a resume, earlier parts already have a final transcript.
             let earlier = session.part > 0 ? (store.loadFinalTranscript(for: meeting) ?? []) : []
-            return earlier + liveSegments.filter { !$0.text.isEmpty }
+            let all = earlier + liveSegments.filter { !$0.text.isEmpty }
+            return (self.meeting(meeting.id) ?? meeting).isProtected ? all.filter { $0.channel != .them } : all
         }
         return store.loadTranscript(for: meeting)
     }
@@ -383,6 +387,7 @@ final class AppModel: ObservableObject {
                 title: title, sourceApp: app?.name, calendarEventTitle: event?.title,
                 attendees: event?.attendees ?? [])
             meeting.calendarEventID = event?.eventID
+            if settings.dataProtection { meeting.dataProtection = true }
             meeting = try store.create(meeting)
             try await begin(meeting, part: 0, app: app)
         } catch {
@@ -467,8 +472,28 @@ final class AppModel: ObservableObject {
         if isRecording { await stopRecording() } else { await startRecording() }
     }
 
+    /// Data Protection for the meeting being recorded. On: system audio stops now, and what was captured of the
+    /// other participants before is dropped (live lines now, audio and final transcript when the recording is
+    /// processed). Off: system audio is captured again from now on. Finished meetings cannot be switched: the other
+    /// side was never recorded, or its audio is already gone.
+    func setDataProtection(_ on: Bool, for meeting: Meeting) {
+        guard let session = recording, session.meeting.id == meeting.id else { return }
+        var m = store.reload(meeting) ?? meeting
+        m.dataProtection = on ? true : false
+        try? store.save(m)
+        update(m)
+        session.setSystemAudio(!on)
+        if on { liveSegments.removeAll { $0.channel == .them } }
+        log.info("data protection \(on ? "on" : "off") for \(m.folderName)")
+    }
+
+    /// Whether the meeting being recorded is in Data Protection mode.
+    var recordingIsProtected: Bool { recording.flatMap { meeting($0.meeting.id) }?.isProtected ?? false }
+
     private func receive(_ segment: TranscriptSegment) {
         guard recording != nil else { return }
+        // Lines still in flight when Data Protection was switched on.
+        if segment.channel == .them, recordingIsProtected { return }
         if let i = liveSegments.firstIndex(where: { $0.id == segment.id }) {
             if segment.isFinal && segment.text.isEmpty {
                 liveSegments.remove(at: i)
@@ -581,11 +606,13 @@ final class AppModel: ObservableObject {
 
     // MARK: Notes repository
 
-    /// Pushes changed meetings to the notes repository a few seconds after the last change.
-    func scheduleSync(_ id: UUID? = nil, removed: UUID? = nil) {
+    /// Pushes changed meetings and passive days to the notes repository a few seconds after the last change.
+    func scheduleSync(_ id: UUID? = nil, removed: UUID? = nil, day: String? = nil, removedDay: String? = nil) {
         guard !settings.notesRepository.isEmpty else { return }
         if let id { syncPending.insert(id) }
         if let removed { syncRemoved.insert(removed) }
+        if let day { syncDays.insert(day); syncRemovedDays.remove(day) }
+        if let removedDay { syncRemovedDays.insert(removedDay); syncDays.remove(removedDay) }
         guard syncTask == nil else { return }
         syncTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
@@ -593,32 +620,48 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Exports every finished meeting (first setup, or after changing the repository).
+    /// Exports every finished meeting and every passive day: after setting up or changing the repository, and at
+    /// launch, which also catches up on changes whose sync was still pending when the app quit (unchanged files
+    /// make no commit).
     func syncAll() {
         for m in meetings where m.status == .done { syncPending.insert(m.id) }
+        syncDays.formUnion(PassiveModel.shared.store.days())
         scheduleSync()
     }
 
     private func runSync() async {
         let ids = syncPending
         let removed = syncRemoved
+        let days = syncDays
+        let removedDays = syncRemovedDays
         syncPending = []
         syncRemoved = []
-        let exports = ids.compactMap { meeting($0) }.filter { $0.status == .done }
-            .map { NotesRepository.Export(meeting: $0, store: store) }
+        syncDays = []
+        syncRemovedDays = []
+        let finished = ids.compactMap { meeting($0) }.filter { $0.status == .done }
+        let store = store
+        let dayStore = PassiveModel.shared.store
         let repo = NotesRepository(remote: settings.notesRepository)
         syncStatus = "Syncing…"
         do {
-            let result = try await Task.detached { try await repo.sync(exports, removedIDs: Array(removed)) }.value
+            let result = try await Task.detached {
+                // Reading every transcript can take a while at launch: off the main thread.
+                let exports = finished.map { NotesRepository.Export(meeting: $0, store: store) }
+                let dayExports = days.sorted().map { NotesRepository.DayExport(day: $0, store: dayStore) }
+                return try await repo.sync(exports, removedIDs: Array(removed), days: dayExports, removedDays: Array(removedDays))
+            }.value
             syncStatus = "\(result) \(Date().formatted(date: .omitted, time: .shortened))"
         } catch {
             log.error("notes sync failed: \(error.localizedDescription)")
             syncStatus = "Sync failed: \(error.localizedDescription)"
             syncPending.formUnion(ids)
             syncRemoved.formUnion(removed)
+            syncDays.formUnion(days.subtracting(syncRemovedDays))
+            syncRemovedDays.formUnion(removedDays.subtracting(syncDays))
         }
         syncTask = nil
-        if !syncPending.isEmpty || !syncRemoved.isEmpty, !(syncStatus ?? "").hasPrefix("Sync failed") { scheduleSync() }
+        let more = !syncPending.isEmpty || !syncRemoved.isEmpty || !syncDays.isEmpty || !syncRemovedDays.isEmpty
+        if more, !(syncStatus ?? "").hasPrefix("Sync failed") { scheduleSync() }
     }
 
     func retranscribe(_ meeting: Meeting) {

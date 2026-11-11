@@ -38,7 +38,13 @@ public struct DayDigester: Sendable {
     public static let noChange = "NO_CHANGE"
 
     /// Weight of one entry for the cadence: its text, or a fixed amount for a meeting marker so it gets in.
-    static func weight(_ entry: DayEntry) -> Int { entry.kind == .meeting ? minNewChars : entry.text.count }
+    static func weight(_ entry: DayEntry) -> Int {
+        switch entry.kind {
+        case .speech: return entry.text.count
+        case .meeting: return minNewChars
+        case .dataProtection: return 0
+        }
+    }
 
     public static func shouldUpdate(pending: [DayEntry], state: DayState, now: Date = Date()) -> Bool {
         let chars = pending.reduce(0) { $0 + weight($1) }
@@ -85,7 +91,8 @@ public struct DayDigester: Sendable {
             let digest = store.read("digest.md", day: day) ?? ""
             let messages = Self.updateMessages(
                 day: day, digest: digest, block: block, before: Array(all[..<done].suffix(12)), settings: settings,
-                language: language(all))
+                language: language(all),
+                protectedAtStart: DayEntry.protectionActive(Array(all[..<done]), before: block.map(\.start).min() ?? .distantFuture))
             let completion: AnthropicClient.Completion
             do {
                 completion = try await client.complete(system: messages.system, user: messages.user, maxTokens: 16_000)
@@ -227,6 +234,20 @@ public struct DayDigester: Sendable {
         or appointment for the user; then keep only what the task needs.
         """
 
+    /// Added to the source rules when the day has Data Protection stretches.
+    static let dataProtectionRules = """
+        ## Data Protection stretches
+        Between "— Data Protection on … —" and "— Data Protection off … —" (or the end of the transcript), only \
+        the microphone was transcribed; sound the Mac played was deliberately not recorded. In calls and video \
+        meetings there you have only the user's side (and people in the same room):
+        - Infer what the other side said or asked from the user's replies where that is clear, and phrase it as \
+        inferred ("the client apparently asked for …"). Never invent their statements, numbers or commitments; \
+        what they promised counts only when the user repeats or confirms it.
+        - Tasks the user took on are certain. Without Mac lines, a monologue on Mic is more likely the user on a \
+        call than media, unless it sounds like TV or radio in the room.
+        - Do not mention the markers themselves or that a side is missing, except once where it matters for an item.
+        """
+
     static let digestInstructions = """
         You keep a running digest of the user's working day. Their Mac transcribes its microphone and its own sound \
         output all day, so most of the transcript is noise. Every so often you receive the current digest and the \
@@ -317,10 +338,10 @@ public struct DayDigester: Sendable {
         - Unresolved points and things to follow up.
         """
 
-    static func fill(_ template: String, language: String) -> String {
+    static func fill(_ template: String, language: String, dataProtection: Bool = false) -> String {
         let h = Headings(language)
         return template
-            .replacingOccurrences(of: "{SOURCE_RULES}", with: sourceRules)
+            .replacingOccurrences(of: "{SOURCE_RULES}", with: sourceRules + (dataProtection ? "\n\n" + dataProtectionRules : ""))
             .replacingOccurrences(of: "{LANGUAGE}", with: language)
             .replacingOccurrences(of: "{NO_CHANGE}", with: noChange)
             .replacingOccurrences(of: "{UNSURE}", with: h.unsure)
@@ -350,7 +371,8 @@ public struct DayDigester: Sendable {
     }
 
     static func updateMessages(
-        day: String, digest: String, block: [DayEntry], before: [DayEntry], settings: AppSettings, language: String
+        day: String, digest: String, block: [DayEntry], before: [DayEntry], settings: AppSettings, language: String,
+        protectedAtStart: Bool = false
     ) -> (system: String, user: String) {
         var user = header(day: day, settings: settings)
         let current = digest.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -360,8 +382,14 @@ public struct DayDigester: Sendable {
         if let first = block.map(\.start).min(), let last = block.map(\.end).max() {
             span = "\(DayStore.clock(first, seconds: false))–\(DayStore.clock(last, seconds: false))"
         }
-        user += "\n## New transcript \(span)\n\(transcript(block))\n"
-        return (fill(digestInstructions, language: language), user)
+        // The marker that switched Data Protection on may lie in an earlier stretch: repeat it at the top.
+        var lines = transcript(block)
+        if protectedAtStart {
+            lines = "— \(DayStore.protectionText(true)) (since earlier) —\n" + lines
+        }
+        user += "\n## New transcript \(span)\n\(lines)\n"
+        let protected = protectedAtStart || block.contains { $0.kind == .dataProtection }
+        return (fill(digestInstructions, language: language, dataProtection: protected), user)
     }
 
     static func finalMessages(
@@ -385,6 +413,7 @@ public struct DayDigester: Sendable {
         } else {
             user += "\n## Full transcript\n(omitted: too long; rely on the digest)\n"
         }
-        return (fill(finalInstructions, language: language), user)
+        let protected = entries.contains { $0.kind == .dataProtection && $0.text == "on" }
+        return (fill(finalInstructions, language: language, dataProtection: protected), user)
     }
 }

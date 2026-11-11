@@ -130,8 +130,11 @@ public final class MeetingStore: @unchecked Sendable {
     }
 
     /// Final transcript if present, otherwise whatever the live transcriber wrote.
+    /// With Data Protection on, system-audio lines are never returned, even if a live file still holds some from
+    /// before the switch.
     public func loadTranscript(for meeting: Meeting) -> [TranscriptSegment] {
-        loadFinalTranscript(for: meeting) ?? loadLiveTranscript(for: meeting)
+        let segments = loadFinalTranscript(for: meeting) ?? loadLiveTranscript(for: meeting)
+        return meeting.isProtected ? segments.filter { $0.channel != .them } : segments
     }
 
     public func loadFinalTranscript(for meeting: Meeting) -> [TranscriptSegment]? {
@@ -221,6 +224,8 @@ public final class MeetingStore: @unchecked Sendable {
             merged.calendarEventTitle = second.calendarEventTitle
             merged.calendarEventID = second.calendarEventID
         }
+        // One-sided only if both were: otherwise the notes model should treat the other side as present.
+        merged.dataProtection = first.isProtected && second.isProtected ? true : nil
 
         // Transcript: shift the second meeting onto the first one's timeline and relabel its speakers.
         let shift = second.startedAt.timeIntervalSince(first.startedAt)

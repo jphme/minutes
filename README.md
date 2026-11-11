@@ -10,11 +10,15 @@ a live transcript, and afterwards writes structured notes.
   leaves the Mac and is deleted after transcription unless you keep it.
 - **Notes with your own API key.** Claude Haiku 5.5 turns the transcript into a summary, decisions, action items and
   open questions, for about one cent per meeting hour. Only text is sent. Without a key you still get transcripts.
+- **Data Protection mode.** One switch, and only your own microphone is transcribed: what the other participants say
+  through your Mac is never captured, not even briefly. The notes are written from your side of the conversation and
+  mark what they infer about the other side. Set the default in Settings, override it per meeting or day with the
+  shield in the toolbar ([details](#data-protection-mode)).
 - **Passive mode (optional).** Listens all day and keeps running notes of what was discussed and what you promised,
   text only, at about 0.15–0.35 % of a MacBook battery per hour (measured: [Passive mode](#passive-mode)).
-- **Notes as files, synced to git, encrypted.** Every meeting is plain Markdown and JSON in a folder you choose.
-  Optionally Minutes pushes them to a git repository encrypted with git-crypt, so coding agents and scripts can read
-  your meeting history from a clone with the key, while the host only sees ciphertext.
+- **Notes as files, synced to git, encrypted.** Every meeting and day is plain Markdown and JSON in a folder you
+  choose. Optionally Minutes pushes meeting notes and day notes to a git repository encrypted with git-crypt, so
+  coding agents and scripts can read your history from a clone with the key, while the host only sees ciphertext.
 - **Calendar-aware.** Titles and attendees come from the event running now; names are corrected with your vocabulary.
 - **No account, no server, no bot in the call.** Works with Zoom, Teams, Meet in any browser, Slack, FaceTime, Webex
   and in-person meetings.
@@ -89,7 +93,32 @@ Everything else is optional:
   `minutes://pause` (`?minutes=N`, default 15) and `minutes://resume`.
 
 **Consent:** many jurisdictions require everyone's consent before a conversation is recorded or transcribed (in
-Germany, recording private speech without consent is a criminal offence). Tell the other participants.
+Germany, recording private speech without consent is a criminal offence). Tell the other participants, or use
+Data Protection mode.
+
+## Data Protection mode
+
+For calls where you cannot ask everyone for consent, or simply do not want to record other people: with Data
+Protection on, Minutes transcribes only your microphone and never starts the system-audio capture, so what the other
+participants say through your Mac is not recorded, buffered or transcribed at any point. Your notes still work: the
+notes model is told it has one side of the conversation, infers what the others asked or proposed from your replies
+where that is clear, marks such points as inferred, and lists what others committed to only when you repeated or
+confirmed it.
+
+- **Default and override.** Settings → General → Data Protection sets the default for new meetings and passive days.
+  The shield button in the toolbar of a meeting (while it records) and of today's day notes switches it for that
+  meeting or day; the menu bar shows "Mic only" instead of the "Them" level meter.
+- **Switching during a meeting.** On: system audio stops at once, and what was captured of the others before is
+  dropped from the live transcript and deleted unheard when the meeting is processed. Off: the others are recorded
+  from that moment on. A finished meeting keeps its mode.
+- **Switching during a passive day** applies from that moment on. The day transcript shows a line where it changed,
+  and the day notes are written with that in mind.
+- **Use headphones.** Without the system audio Minutes cannot remove loudspeaker echo, so with speakers the
+  microphone would pick up the other side. The meeting header warns while the Mac plays through its speakers.
+- **People in the same room** are still heard by the microphone. Data Protection keeps out the remote side, not
+  voices next to you.
+- Meetings and days recorded this way carry `"dataProtection": true` in `meeting.json` and `data_protection: true` in
+  the synced notes.
 
 ## Passive mode
 
@@ -128,7 +157,7 @@ Days/2026-11-09/
   transcript.md      the same, readable
   digest.md          running notes (replaced on each update)
   summary.md         end-of-day summary
-  day.json           digest progress and API cost
+  day.json           digest progress, API cost, and the day's Data Protection choice
 ```
 
 ## How it works
@@ -136,7 +165,7 @@ Days/2026-11-09/
 | Step | What happens | Where |
 |---|---|---|
 | Detection | Every 1.5 s, Core Audio's process list shows which apps capture from an input device; call apps and browsers count as meetings. After 3 s a notification offers to transcribe. | local |
-| Capture | Two streams: the microphone ("Me", through a Core Audio IOProc) and everything the Mac plays ("Them", through a Core Audio process tap; no virtual audio driver). Both are aligned on the host clock and written as 16 kHz audio while the meeting runs. | local |
+| Capture | Two streams: the microphone ("Me", through a Core Audio IOProc) and everything the Mac plays ("Them", through a Core Audio process tap; no virtual audio driver). Both are aligned on the host clock and written as 16 kHz audio while the meeting runs. With Data Protection the tap does not run. | local |
 | Live transcript | Silero VAD cuts each stream into utterances; Parakeet transcribes each one as it ends, and every ~1.5 s while it is still going. | local, Neural Engine |
 | Final transcript | After the meeting both channels are transcribed again in full. The "Them" channel is split into speakers (pyannote community-1 + VBx), the microphone too when several people share the room (the one who talks most is "Me"). Loudspeaker echo is dropped from the microphone channel and the vocabulary is applied. A one-hour meeting takes well under a minute. Then the audio is deleted. | local, Neural Engine |
 | Notes | Transcript, your own notes, calendar attendees, vocabulary and background go to Claude Haiku 5.5, which writes a summary, topics, decisions, action items and open questions. | Anthropic API |
@@ -183,21 +212,28 @@ Settings live in `~/Library/Application Support/Minutes/`: `settings.json`, `con
 ## Sync to a git repository
 
 Settings → Sync takes a git remote, for example a new private GitHub repository. After each meeting, and when notes,
-titles or speaker names change, Minutes commits and pushes. Deleting a meeting removes it from the repository (it
-stays in the git history).
+titles or speaker names change, Minutes commits and pushes. Passive mode's day notes go along whenever they are
+updated (every 10–30 minutes of new speech, and after the day summary); "Forget last 15 min" removes the text there
+too. At launch Minutes exports everything once more, which catches up on anything that could not be pushed before
+(unchanged files make no commit). Deleting a meeting or a day removes it from the repository (it stays in the git
+history).
 
 ```
 README.md, .gitattributes             plain text
-index.md                              all meetings, newest first
+index.md                              all meetings, newest first, then all days
 meetings/2026/2026-11-09-1430-weekly-sync-b2a314b9/
   notes.md                            YAML front matter (title, start/end, attendees, event, speakers) + notes
   transcript.md
   my-notes.md                         your own notes, if any
+days/2026/2026-11-09/
+  notes.md                            the day summary, or the running notes while the day lasts
+  transcript.md                       the day's transcript in time order (Mic / Mac)
 ```
 
 File contents are encrypted with [git-crypt](https://github.com/AGWA/git-crypt); folder names and commit messages
 stay readable (date, time, title) so files are easy to find. Before each push Minutes checks that every meeting
-file is encrypted and refuses to push otherwise. Audio is never synced.
+and day file is encrypted and refuses to push otherwise. Audio is never synced. Repositories created by earlier
+versions get the `days/` encryption rule added to `.gitattributes` automatically on the next sync.
 
 Setup: `brew install git-crypt`, make sure `git push` to the remote works from your account (for GitHub:
 `gh auth setup-git`), then enter the remote URL. On the first sync to an empty repository Minutes runs
@@ -209,12 +245,12 @@ key up in a password manager; another machine or a cloud agent unlocks a clone w
 ```bash
 swift build -c release                      # app + CLI
 .build/release/minutes-cli transcribe --model parakeet-ultra file.wav
-.build/release/minutes-cli process --me me.wav --them them.wav --library /tmp/lib [--no-summary]
+.build/release/minutes-cli process --me me.wav --them them.wav --library /tmp/lib [--no-summary] [--data-protection]
 .build/release/minutes-cli record --seconds 30 --live
 .build/release/minutes-cli summarize --library /tmp/lib --meeting "<folder>"
 .build/release/minutes-cli merge --library <dir> --meeting "<first>" --with "<second>" --summarize
 .build/release/minutes-cli compare --library <dir> --meeting "<folder>" --models claude-haiku-5-5:high,claude-sonnet-5-5:low --out ab.json
-.build/release/minutes-cli sync-notes       # export all finished meetings to the configured repository
+.build/release/minutes-cli sync-notes       # export all finished meetings and days to the configured repository
 .build/release/minutes-cli delete --meeting "<folder>"
 build.noindex/Minutes.app/Contents/MacOS/Minutes --snapshot /tmp/snap   # render the UI to PNGs
 open -n -a ~/Applications/Minutes.app --args --calendar-report /tmp/cal.txt 2   # calendars and events the app sees

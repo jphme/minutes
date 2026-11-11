@@ -42,6 +42,11 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
+            Section("Data Protection") {
+                Toggle("Transcribe only my microphone (Data Protection)", isOn: $model.settings.dataProtection)
+                Text("On: meetings and passive mode never capture what your Mac plays, so the other side of calls is not recorded at all; only what you say is transcribed, and the notes are written from your side of the conversation. This is the default for new meetings and days; switch it per meeting or day with the shield in the toolbar. Use headphones: through speakers, the microphone hears the other side too. People in the same room are still picked up by the microphone.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Meetings") {
                 Toggle("Detect meetings when a call app uses the microphone", isOn: $model.settings.detectMeetings)
                 Toggle("Record detected calls without asking", isOn: $model.settings.autoStartRecording)

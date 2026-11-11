@@ -37,7 +37,7 @@ struct TranscriptView: View {
                     Text("Live transcript").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
                     LevelMeter(level: model.levels.me, label: "Me")
-                    LevelMeter(level: model.levels.them, label: "Them")
+                    ThemMeterOrShield()
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)

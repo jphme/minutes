@@ -34,6 +34,11 @@ public struct Meeting: Codable, Sendable, Identifiable, Equatable, Hashable {
     public var parts: [RecordingPart]?
     /// EventKit identifier of the linked calendar event, if any.
     public var calendarEventID: String?
+    /// Data Protection: only the microphone is transcribed; system audio (the other participants) is not captured,
+    /// and any of it from before the switch is dropped. Optional so older meeting.json files still decode.
+    public var dataProtection: Bool?
+
+    public var isProtected: Bool { dataProtection ?? false }
 
     public init(
         id: UUID = UUID(), title: String, startedAt: Date = Date(), status: Status = .recording,

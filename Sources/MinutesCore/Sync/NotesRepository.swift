@@ -13,7 +13,37 @@ private let log = MinutesLog("NotesSync")
 ///         notes.md                       encrypted: front matter (title, time, attendees) + generated notes
 ///         transcript.md                  encrypted
 ///         my-notes.md                    encrypted, only if the user typed notes
+///     days/2026/2026-11-09/              passive mode, one folder per day
+///         notes.md                       encrypted: front matter + day summary (finished days) or running notes
+///         transcript.md                  encrypted: the day's transcript in time order
 public actor NotesRepository {
+    /// One passive-mode day.
+    public struct DayExport: Sendable {
+        public var day: String
+        /// What the app shows first: the day summary once the day is over, the running notes while it lasts.
+        public var notes: String
+        public var isSummary: Bool
+        public var transcriptMarkdown: String
+        public var dataProtection: Bool
+
+        public init(day: String, store: DayStore, today: String = DayStore.key(for: Date())) {
+            self.day = day
+            func text(_ name: String) -> String? {
+                let t = store.read(name, day: day)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return t.isEmpty ? nil : t
+            }
+            let summary = day < today ? text("summary.md") : nil
+            isSummary = summary != nil
+            notes = summary ?? text("digest.md") ?? ""
+            let entries = store.entries(day).sorted { $0.start < $1.start }
+            dataProtection = entries.contains { $0.kind == .dataProtection && $0.text == "on" }
+            transcriptMarkdown = entries.isEmpty
+                ? "" : DayStore.markdownHeader(day) + entries.map(DayStore.markdownLine).joined()
+        }
+
+        var isEmpty: Bool { notes.isEmpty && transcriptMarkdown.isEmpty }
+    }
+
     public struct Export: Sendable {
         public var meeting: Meeting
         public var summary: String
@@ -60,17 +90,35 @@ public actor NotesRepository {
         self.local = local
     }
 
-    /// Writes the given meetings, removes deleted ones, commits and pushes. Returns a short status line.
+    /// Writes the given meetings and days, removes deleted ones, commits and pushes. Returns a short status line.
     @discardableResult
-    public func sync(_ exports: [Export], removedIDs: [UUID]) throws -> String {
+    public func sync(
+        _ exports: [Export], removedIDs: [UUID], days: [DayExport] = [], removedDays: [String] = []
+    ) throws -> String {
         try prepare()
         try pullRebase()
         let fm = FileManager.default
         var written = 0
         var titles: [String] = []
-        let readme = local.appendingPathComponent("README.md")
-        if (try? String(contentsOf: readme, encoding: .utf8)) != Self.readme {
-            try Self.readme.write(to: readme, atomically: true, encoding: .utf8)
+        // Repositories set up before days were synced lack the days/ rule. `git add` reads the attributes from the
+        // working tree, so the updated file applies to the day files added in the same commit (verified below).
+        for (name, content) in [("README.md", Self.readme), (".gitattributes", Self.gitattributes)] {
+            let url = local.appendingPathComponent(name)
+            if (try? String(contentsOf: url, encoding: .utf8)) != content {
+                try content.write(to: url, atomically: true, encoding: .utf8)
+            }
+        }
+        var dayNames: [String] = []
+        for export in days {
+            let dir = local.appendingPathComponent(Self.dayPath(export.day), isDirectory: true)
+            guard !export.isEmpty else { continue }
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Self.dayNotesFile(export).write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+            try export.transcriptMarkdown.write(to: dir.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+            dayNames.append(export.day)
+        }
+        for day in removedDays {
+            try? fm.removeItem(at: local.appendingPathComponent(Self.dayPath(day), isDirectory: true))
         }
         for export in exports where !export.transcriptMarkdown.isEmpty || !export.summary.isEmpty {
             let dir = local.appendingPathComponent(Self.folderPath(export.meeting), isDirectory: true)
@@ -101,9 +149,15 @@ public actor NotesRepository {
         guard !staged.isEmpty || !removed.isEmpty else { return "Notes repository is up to date." }
         try verifyEncrypted(staged)
         let count = Set(staged.compactMap { $0.hasPrefix("meetings/") ? $0.split(separator: "/").dropLast().last : nil }).count
+        let changedDays = Set(staged.compactMap { $0.hasPrefix("days/") ? $0.split(separator: "/").dropLast().last.map(String.init) : nil })
+            .sorted()
+        let deletedDays = Set(removed.compactMap { $0.hasPrefix("days/") ? $0.split(separator: "/").dropLast().last.map(String.init) : nil })
+            .sorted()
         var message: [String] = []
-        if count > 0 { message.append("Update \(titles.count == 1 ? titles[0] : "\(count) meetings")") }
+        if count > 0 { message.append("Update \(titles.count == 1 ? titles[0] : count == 1 ? "1 meeting" : "\(count) meetings")") }
+        if !changedDays.isEmpty { message.append("Update day notes \(changedDays.joined(separator: ", "))") }
         if !removedTitles.isEmpty { message.append("Remove \(removedTitles.joined(separator: ", "))") }
+        if !deletedDays.isEmpty { message.append("Remove day notes \(deletedDays.joined(separator: ", "))") }
         let body = titles.count > 1 ? "\n\n" + titles.map { "- \($0)" }.joined(separator: "\n") : ""
         try git("commit", "-q", "-m", (message.isEmpty ? ["Update meeting notes"] : message).joined(separator: "; ") + body)
         do {
@@ -112,9 +166,13 @@ public actor NotesRepository {
             try pullRebase()
             try git("push", "-q", "-u", "origin", branch)
         }
-        log.info("pushed notes: \(written) written, \(removedIDs.count) removed")
-        let removedText = removedTitles.isEmpty ? "" : ", removed \(removedTitles.count)"
-        return "Synced \(count) meeting\(count == 1 ? "" : "s")\(removedText) to \(remote)."
+        log.info("pushed notes: \(written) meetings written, \(removedIDs.count) removed, \(dayNames.count) days written, \(removedDays.count) removed")
+        var parts: [String] = []
+        if count > 0 || changedDays.isEmpty { parts.append("\(count) meeting\(count == 1 ? "" : "s")") }
+        if !changedDays.isEmpty { parts.append("\(changedDays.count) day\(changedDays.count == 1 ? "" : "s")") }
+        let removedCount = removedTitles.count + deletedDays.count
+        let removedText = removedCount == 0 ? "" : ", removed \(removedCount)"
+        return "Synced \(parts.joined(separator: " and "))\(removedText) to \(remote)."
     }
 
     // MARK: Setup
@@ -169,12 +227,13 @@ public actor NotesRepository {
     private func pullRebase() throws {
         try git("fetch", "-q", "origin")
         guard !((try? git("ls-remote", "--heads", "origin", branch)) ?? "").isEmpty else { return }
-        try git("rebase", "-q", "origin/\(branch)")
+        // --autostash: files left uncommitted by an interrupted or refused sync must not block every later one.
+        try git("rebase", "-q", "--autostash", "origin/\(branch)")
     }
 
     /// Every staged file that the attributes mark for encryption must be stored as a git-crypt blob.
     private func verifyEncrypted(_ files: [String]) throws {
-        let mustEncrypt = files.filter { $0.hasPrefix("meetings/") || $0 == "index.md" }
+        let mustEncrypt = files.filter { $0.hasPrefix("meetings/") || $0.hasPrefix("days/") || $0 == "index.md" }
         var plain: [String] = []
         for file in mustEncrypt {
             let header = try runData(Self.git, ["cat-file", "blob", ":\(file)"], in: local).prefix(10)
@@ -196,6 +255,19 @@ public actor NotesRepository {
         f.dateFormat = "yyyy-MM-dd-HHmm"
         let slug = Self.slug(m.title)
         return "meetings/\(year)/\(f.string(from: m.startedAt))\(slug.isEmpty ? "" : "-" + slug)-\(m.id.uuidString.prefix(8).lowercased())"
+    }
+
+    /// "days/2026/2026-11-09"
+    public static func dayPath(_ day: String) -> String { "days/\(day.prefix(4))/\(day)" }
+
+    static func dayNotesFile(_ e: DayExport) -> String {
+        var fm = "---\n"
+        fm += "date: \(e.day)\n"
+        fm += "kind: passive-day\n"
+        fm += "notes: \(e.notes.isEmpty ? "none" : e.isSummary ? "day-summary" : "running")\n"
+        if e.dataProtection { fm += "data_protection: true\n" }
+        fm += "---\n\n"
+        return fm + "# Day notes \(e.day)\n\n" + (e.notes.isEmpty ? "_No notes yet._" : e.notes) + "\n"
     }
 
     /// "Planung Q3 mit Müller & Söhne (v2)" -> "planung-q3-mit-mueller-soehne-v2", at most 60 characters.
@@ -248,6 +320,7 @@ public actor NotesRepository {
         let speakers = m.speakerNames.filter { !$0.value.isEmpty }
         if !speakers.isEmpty { fm += "speakers: {\(speakers.sorted { $0.key < $1.key }.map { "\(q($0.key)): \(q($0.value))" }.joined(separator: ", "))}\n" }
         if let model = m.summaryModel { fm += "notes_model: \(model)\n" }
+        if m.isProtected { fm += "data_protection: true\n" }
         fm += "id: \(m.id.uuidString)\n---\n\n"
         let body = e.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         return fm + "# \(m.title)\n\n" + (body.isEmpty ? "_No generated notes._" : body) + "\n"
@@ -272,7 +345,20 @@ public actor NotesRepository {
             }
         }
         let table = rows.sorted { $0.start > $1.start }.map(\.line).joined(separator: "\n")
-        let index = """
+        var dayRows: [String] = []
+        let daysDir = local.appendingPathComponent("days")
+        for year in (try? FileManager.default.contentsOfDirectory(at: daysDir, includingPropertiesForKeys: nil)) ?? [] {
+            for dir in (try? FileManager.default.contentsOfDirectory(at: year, includingPropertiesForKeys: nil)) ?? [] {
+                let notes = dir.appendingPathComponent("notes.md")
+                guard FileManager.default.fileExists(atPath: notes.path) else { continue }
+                let kind = Self.frontMatter("notes", in: notes) ?? ""
+                let label = kind == "day-summary" ? "day summary" : kind == "running" ? "running notes" : "no notes yet"
+                let path = "days/\(year.lastPathComponent)/\(dir.lastPathComponent)"
+                dayRows.append("| [\(dir.lastPathComponent)](\(path)/notes.md) | \(label) | [transcript](\(path)/transcript.md) |")
+            }
+        }
+        let dayTable = dayRows.sorted(by: >).joined(separator: "\n")
+        var index = """
             # Meetings
 
             Newest first. Each folder has notes.md (front matter + notes), transcript.md and, if any, my-notes.md.
@@ -282,12 +368,27 @@ public actor NotesRepository {
             \(table)
 
             """
+        if !dayRows.isEmpty {
+            index += """
+
+                # Day notes (passive mode)
+
+                Newest first. Each folder has notes.md (the day summary, or the running notes while the day lasts) and
+                transcript.md (Mic = microphone, Mac = sound the computer played).
+
+                | Day | Notes | Transcript |
+                |---|---|---|
+                \(dayTable)
+
+                """
+        }
         try index.write(to: local.appendingPathComponent("index.md"), atomically: true, encoding: .utf8)
     }
 
     static let gitattributes = """
         # Everything except this file and README.md is encrypted with git-crypt.
         meetings/** filter=git-crypt diff=git-crypt
+        days/** filter=git-crypt diff=git-crypt
         index.md filter=git-crypt diff=git-crypt
 
         """
@@ -301,11 +402,16 @@ public actor NotesRepository {
 
         ## Layout
 
-        - `index.md`: all meetings, newest first (start, title, length, attendees, link).
+        - `index.md`: all meetings, newest first (start, title, length, attendees, link), then all passive days.
         - `meetings/<year>/<yyyy-mm-dd-hhmm>-<title>-<id>/notes.md`: YAML front matter (title, start/end, attendees,
           calendar event, speaker names) followed by the generated notes.
         - `.../transcript.md`: the speaker-labelled transcript ("Me" is the owner of the notes).
         - `.../my-notes.md`: notes typed by hand during the meeting, if any.
+        - `days/<year>/<yyyy-mm-dd>/notes.md`: passive mode's notes for that day (the day summary once the day is
+          over, the running notes while it lasts). `.../transcript.md`: the day's transcript ("Mic" is the
+          microphone, "Mac" is sound the computer played).
+        - `data_protection: true` in the front matter: recorded in Data Protection mode, so only the microphone
+          was transcribed and the other side of calls is missing.
 
         ## Reading the notes elsewhere
 

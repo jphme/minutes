@@ -41,6 +41,10 @@ final class PassiveModel: ObservableObject {
     @Published private(set) var previews: [PassiveRecorder.Preview] = []
     /// Day waiting for the user to confirm deletion.
     @Published var confirmDeleteDay: String?
+    /// Data Protection for today: the day's own choice, or the setting. On, only the microphone is captured.
+    @Published private(set) var protectedToday = false
+    /// The mode the running recorder was started in.
+    private var recorderProtected = false
 
     /// True while today's transcript is on screen: only then are running utterances transcribed every 2 s.
     private var transcriptOnScreen = false
@@ -138,6 +142,7 @@ final class PassiveModel: ObservableObject {
         }
         if old.passiveMode != new.passiveMode || old.passiveBatteryThreshold != new.passiveBatteryThreshold
             || old.passivePauseWhenLocked != new.passivePauseWhenLocked || old.libraryPath != new.libraryPath
+            || old.dataProtection != new.dataProtection
         {
             reconcile()
         }
@@ -224,8 +229,9 @@ final class PassiveModel: ObservableObject {
         reconcile()
     }
 
-    /// Starts or stops capture to match the switch and the pause reasons. Transitions run one at a time.
+    /// Starts or stops capture to match the switch, the pause reasons and Data Protection. Transitions run one at a time.
     private func reconcile() {
+        protectedToday = store.loadState(today).dataProtection ?? settings.dataProtection
         let previous = transition
         transition = Task { [weak self] in
             await previous?.value
@@ -233,9 +239,39 @@ final class PassiveModel: ObservableObject {
         }
     }
 
+    /// Today's Data Protection, from the day's toolbar. Takes effect at once: the recorder restarts with or without
+    /// system audio, and a marker in the transcript records the switch.
+    func setDataProtection(_ on: Bool) {
+        store.updateState(today) { $0.dataProtection = on == settings.dataProtection ? nil : on }
+        revision += 1
+        reconcile()
+    }
+
+    /// Appends a marker when today's transcript does not yet reflect the mode capture runs in.
+    private func markProtection(_ on: Bool) {
+        if loadedDay != today { reloadToday() }
+        guard DayEntry.protectionActive(todayEntries) != on else { return }
+        let entry = DayEntry.dataProtection(on)
+        store.append(entry)
+        received(entry)
+        refreshDays()
+    }
+
     private func applyState() async {
         let shouldRun = isEnabled && reasons.isEmpty
-        if shouldRun, recorder == nil {
+        let protect = protectedToday
+        let wasListening = state
+        if let rec = recorder, shouldRun, recorderProtected != protect {
+            // Data Protection switched: restart with the other set of sources.
+            recorder = nil
+            stopping = rec
+            await rec.stop()
+            stopping = nil
+            previews = []
+        }
+        if shouldRun, let _ = recorder {
+            markProtection(protect)  // a new day may have started in this mode
+        } else if shouldRun, recorder == nil {
             state = .starting
             guard let models = await app.speechModels() else {
                 state = .failed(app.modelStatus ?? "Speech model not loaded")
@@ -246,7 +282,7 @@ final class PassiveModel: ObservableObject {
             guard isEnabled, reasons.isEmpty else { return updateIdleState() }
             let store = store
             let rec = PassiveRecorder(
-                store: store,
+                store: store, channels: protect ? [.me] : Set(Channel.allCases),
                 onPreview: { preview in Task { @MainActor in PassiveModel.shared.received(preview) } }
             ) { entry in
                 Task { @MainActor in PassiveModel.shared.received(entry) }
@@ -254,9 +290,15 @@ final class PassiveModel: ObservableObject {
             do {
                 try await rec.start(asr: asr, vad: vad)
                 recorder = rec
+                recorderProtected = protect
+                markProtection(protect)
                 livePreview = false
                 updateLivePreview()
-                state = .listening(since: Date())
+                if case .listening(let since) = wasListening {
+                    state = .listening(since: since)
+                } else {
+                    state = .listening(since: Date())
+                }
                 for w in rec.warnings { app.lastError = w }
             } catch {
                 await rec.stop()
@@ -333,9 +375,14 @@ final class PassiveModel: ObservableObject {
             recorder?.forget(from: Calendar.current.startOfDay(for: now), to: now)
             previews = []
         }
+        // Today's Data Protection choice lives in day.json, which goes to the Trash with the day: keep it.
+        let choice = day == today ? store.loadState(day).dataProtection : nil
         do {
             try store.delete(day)
             log.info("deleted passive day \(day)")
+            app.scheduleSync(removedDay: day)
+            if let choice { store.updateState(day) { $0.dataProtection = choice } }
+            if day == today { reconcile() }  // the fresh transcript gets its Data Protection marker again
         } catch {
             app.lastError = "Could not delete the day: \(error.localizedDescription)"
         }
@@ -404,7 +451,11 @@ final class PassiveModel: ObservableObject {
         if let until = userPauseUntil, until <= Date() { resume() }
         // A failed start (permission still pending, model still loading) is retried.
         if case .failed = state, isEnabled, reasons.isEmpty { reconcile() }
-        if loadedDay != today { reloadToday(); refreshDays() }
+        if loadedDay != today {
+            reloadToday()
+            refreshDays()
+            reconcile()  // the new day starts with the default Data Protection
+        }
         guard app.hasAPIKey, settings.llmProvider == .anthropic else { return }
         let day = today
         let now = Date()
@@ -445,8 +496,9 @@ final class PassiveModel: ObservableObject {
         let digester = DayDigester(store: store, settings: settings)
         Task {
             do {
-                _ = try await Task.detached { try await digester.update(day) }.value
+                let result = try await Task.detached { try await digester.update(day) }.value
                 digestFailedAt[day] = nil
+                if result.calls > result.unchanged { app.scheduleSync(day: day) }
             } catch {
                 log.error("digest update failed\(automatic ? ", retrying in 15 min" : ""): \(error.localizedDescription)")
                 digestFailedAt[day] = Date()
@@ -467,6 +519,7 @@ final class PassiveModel: ObservableObject {
                     try await digester.update(day)
                     try await digester.finalize(day, meetings: meetings)
                 }.value
+                app.scheduleSync(day: day)
             } catch {
                 log.error("day summary failed: \(error.localizedDescription)")
                 store.updateState(day) { $0.lastError = error.localizedDescription }
@@ -484,7 +537,12 @@ final class PassiveModel: ObservableObject {
         stopping?.forget(from: since, to: now)
         // The window can reach back across midnight.
         var removed = 0
-        for day in Set([DayStore.key(for: since), today]) { removed += store.forget(since: since, day: day) }
+        for day in Set([DayStore.key(for: since), today]) {
+            let n = store.forget(since: since, day: day)
+            removed += n
+            // The forgotten text must leave the notes repository too.
+            if n > 0 { app.scheduleSync(day: day) }
+        }
         previews.removeAll { $0.start >= since }
         reloadToday()
         revision += 1
@@ -498,13 +556,14 @@ final class PassiveModel: ObservableObject {
     /// For `--snapshot`: load the days and show the state passive mode would have, without capturing.
     func prepareForSnapshot() {
         refreshDays()
+        protectedToday = store.loadState(today).dataProtection ?? settings.dataProtection
         todayEntries = store.entries(today)
         if isEnabled || snapshotListening {
             state = .listening(since: Calendar.current.startOfDay(for: Date()).addingTimeInterval(9 * 3600))
             if let last = todayEntries.last {
                 previews = [
                     .init(id: UUID(), channel: .me, start: last.end.addingTimeInterval(20), text: "This line has ended and waits for the echo check.", ended: true),
-                    .init(id: UUID(), channel: .them, start: last.end.addingTimeInterval(26), text: "And this one is still being spoken", ended: false),
+                    .init(id: UUID(), channel: protectedToday ? .me : .them, start: last.end.addingTimeInterval(26), text: "And this one is still being spoken", ended: false),
                 ]
             }
         }

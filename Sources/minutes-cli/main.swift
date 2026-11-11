@@ -10,8 +10,10 @@ func usage() -> Never {
         """
         usage:
           minutes-cli transcribe --model <\(AsrModelKind.allCases.map(\.rawValue).joined(separator: "|"))> [--jsonl out.jsonl] file...
-          minutes-cli process [--library dir] [--title T] [--me me.wav] [--them them.wav] [--no-summary]
+          minutes-cli process [--library dir] [--title T] [--me me.wav] [--them them.wav] [--no-summary] [--data-protection]
               Imports the recordings as a meeting and runs the post-meeting pipeline (final transcript, speakers, notes).
+              --data-protection marks it as recorded in Data Protection mode: the --them track is dropped unheard
+              and the notes are written from the microphone side only.
           minutes-cli record --seconds N [--library dir] [--live]
               Records system audio + microphone into a new meeting folder (raw CAF, no post-processing).
           minutes-cli store-api-key
@@ -26,9 +28,9 @@ func usage() -> Never {
           minutes-cli delete --library dir --meeting <folder>
               Moves a meeting to the Trash and removes it from the notes repository.
           minutes-cli sync-notes [--library dir] [--repo url]
-              Exports all finished meetings to the notes git repository (git-crypt encrypted) and pushes.
+              Exports all finished meetings and passive days to the notes git repository (git-crypt encrypted) and pushes.
           minutes-cli passive --seconds N [--library dir] [--channels me|them|both] [--digest] [--preview]
-                              [--me-file mic.wav] [--them-file system.wav]
+                              [--me-file mic.wav] [--them-file system.wav] [--data-protection]
               Passive mode without the app: transcribes mic + system audio into <library>/Days/<date>/ (text only),
               prints work statistics (CPU, Neural Engine time), and with --digest updates the day's digest at the end.
               With --me-file/--them-file, plays files through the pipeline in real time instead of capturing.
@@ -105,7 +107,9 @@ case "process":
     let them = option("--them")
     if args.contains("--no-summary") { settings.llmProvider = .none }
     let store = MeetingStore(root: library)
-    var meeting = try store.create(Meeting(title: title, status: .processing))
+    var meeting = Meeting(title: title, status: .processing)
+    if args.contains("--data-protection") { meeting.dataProtection = true }
+    meeting = try store.create(meeting)
     for (channel, path) in [(Channel.me, me), (Channel.them, them)] {
         guard let path else { continue }
         // Normalize to 16 kHz mono CAF, as the recorder would have written it.
@@ -238,7 +242,10 @@ case "sync-notes":
     }
     let repo = NotesRepository(remote: url)
     let meetings = store.list().filter { $0.status == .done }
-    let result = try await repo.sync(meetings.map { NotesRepository.Export(meeting: $0, store: store) }, removedIDs: [])
+    let dayStore = DayStore(library: store.root)
+    let result = try await repo.sync(
+        meetings.map { NotesRepository.Export(meeting: $0, store: store) }, removedIDs: [],
+        days: dayStore.days().map { NotesRepository.DayExport(day: $0, store: dayStore) })
     print(result)
 case "passive":
     let settings = AppPaths.loadSettings()
@@ -249,10 +256,15 @@ case "passive":
     try await asr.load()
     let vad = try await VadManager(config: VadConfig(defaultThreshold: 0.5))
     // --channels me|them|both (default both), to measure the cost of each capture.
-    let channels: Set<Channel> = switch option("--channels") {
+    var channels: Set<Channel> = switch option("--channels") {
     case "me": [.me]
     case "them": [.them]
     default: [.me, .them]
+    }
+    // --data-protection: microphone only, with the marker the app writes, as in the app's Data Protection mode.
+    if args.contains("--data-protection") {
+        channels = [.me]
+        store.append(.dataProtection(true))
     }
     // --me-file / --them-file: play audio files through the pipeline in real time instead of capturing (no
     // microphone, nothing audible), to test passive mode without talking. --preview turns live preview on.
