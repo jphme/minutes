@@ -25,6 +25,9 @@ public actor NotesRepository {
         public var isSummary: Bool
         public var transcriptMarkdown: String
         public var dataProtection: Bool
+        /// Update the day only if the repository has it already (after "Forget": remove text there, but do not
+        /// push a day early that was not synced yet).
+        public var onlyIfPresent = false
 
         public init(day: String, store: DayStore, today: String = DayStore.key(for: Date())) {
             self.day = day
@@ -112,6 +115,7 @@ public actor NotesRepository {
         for export in days {
             let dir = local.appendingPathComponent(Self.dayPath(export.day), isDirectory: true)
             guard !export.isEmpty else { continue }
+            if export.onlyIfPresent, !fm.fileExists(atPath: dir.path) { continue }
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             try Self.dayNotesFile(export).write(to: dir.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
             try export.transcriptMarkdown.write(to: dir.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)

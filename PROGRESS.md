@@ -30,10 +30,11 @@ Not yet verified by a human:
 
 ## Day notes in the notes repository
 
-Passive days are synced to `days/<year>/<date>/` (README → Sync). Verified by agent from the CLI against a local bare
+Passive days are synced to `days/<year>/<date>/` once their summary is written (README → Sync). Verified by agent from the CLI against a local bare
 repository: fresh repository, upgrade of a repository with the old `.gitattributes` (rule added, day files pushed
 as git-crypt blobs), no-op second run, decryption in a fresh clone. Not yet verified by a human: the first launch
-against the real repository (catch-up of all past days) and the push after a digest update inside the app.
+against the real repository (catch-up of all past days) and the push after the day summary inside the app. Transcripts are selectable across lines (snapshot selection check);
+not yet tried by a human during a live recording.
 
 ## Data Protection mode
 

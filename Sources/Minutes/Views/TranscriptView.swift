@@ -45,14 +45,17 @@ struct TranscriptView: View {
             }
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: compact ? 8 : 12) {
-                        ForEach(segments) { seg in
-                            row(seg).id(seg.id)
-                        }
-                        if segments.isEmpty {
-                            Text(live ? "Listening… the transcript appears as people speak." : "No transcript.")
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 20)
+                    VStack(alignment: .leading, spacing: 0) {
+                        TranscriptText(
+                            lines: segments.map(line), compact: compact,
+                            empty: !filter.isEmpty ? "No matching lines."
+                                : live ? "Listening… the transcript appears as people speak." : "No transcript."
+                        ) { url in
+                            guard url.scheme == "minutes-speaker",
+                                let speaker = url.absoluteString.dropFirst("minutes-speaker:".count).removingPercentEncoding
+                            else { return }
+                            newName = meeting.speakerNames[speaker] ?? ""
+                            renaming = speaker
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
@@ -84,16 +87,15 @@ struct TranscriptView: View {
         }
     }
 
-    private func row(_ seg: TranscriptSegment) -> some View {
+    private func line(_ seg: TranscriptSegment) -> TranscriptLine {
         let canRename = seg.channel == .them && !live
-        return TranscriptRow(
+        var link: URL?
+        if canRename, let encoded = seg.speaker.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) {
+            link = URL(string: "minutes-speaker:" + encoded)
+        }
+        return TranscriptLine(
             time: compact ? nil : clock(seg.start), speaker: meeting.displayName(for: seg.speaker),
-            color: SpeakerColor.color(for: seg.speaker), text: seg.text, settled: seg.isFinal, compact: compact,
-            speakerHelp: canRename ? "Click to name this speaker" : nil,
-            onSpeakerTap: canRename ? {
-                newName = meeting.speakerNames[seg.speaker] ?? ""
-                renaming = seg.speaker
-            } : nil)
+            color: SpeakerColor.color(for: seg.speaker), text: seg.text, settled: seg.isFinal, speakerLink: link)
     }
 
     private func commitRename(_ speaker: String) {
@@ -102,40 +104,98 @@ struct TranscriptView: View {
     }
 }
 
-/// One utterance: time, speaker label, text. Meetings and passive days share it so both transcripts look the same.
-struct TranscriptRow: View {
+/// One entry of a transcript: an utterance (time, speaker, text) or a note line such as a meeting marker.
+struct TranscriptLine {
     var time: String?
-    var timeWidth: CGFloat = 44
-    var speaker: String
-    var color: Color
+    var speaker = ""
+    var color: Color = .secondary
     var text: String
     /// false for text that may still change (an utterance in progress, or one not stored yet).
     var settled = true
+    /// Makes the speaker name clickable (renaming a speaker).
+    var speakerLink: URL?
+    /// A note line instead of an utterance: small grey text, optionally followed by a link ("Open notes").
+    var isNote = false
+    var link: (title: String, url: URL)?
+}
+
+/// Turns transcript lines into one attributed string for `SelectableText`, so a transcript selects and copies like
+/// a document: across lines, with times and speakers ("10:41:42  Anna" above the text). Meetings and passive days
+/// share it so both transcripts look the same.
+enum TranscriptRenderer {
+    static func render(_ lines: [TranscriptLine], compact: Bool = false, timeWidth: CGFloat = 44) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let hasTime = lines.contains { $0.time != nil }
+        let column: CGFloat = hasTime ? timeWidth + 10 : 0
+        let small = NSFont.systemFont(ofSize: 10)
+        let body = NSFont.systemFont(ofSize: compact ? 12 : 13)
+        func style(first: CGFloat, head: CGFloat, before: CGFloat, after: CGFloat = 0) -> NSParagraphStyle {
+            let s = NSMutableParagraphStyle()
+            s.firstLineHeadIndent = first
+            s.headIndent = head
+            s.paragraphSpacingBefore = out.length == 0 ? 0 : before
+            s.paragraphSpacing = after
+            s.tabStops = [NSTextTab(textAlignment: .left, location: column)]
+            s.lineBreakMode = .byWordWrapping
+            return s
+        }
+        for line in lines {
+            if out.length > 0 { out.append(NSAttributedString(string: "\n")) }
+            let start = out.length
+            if line.isNote {
+                let p = style(first: column, head: column, before: compact ? 8 : 12)
+                out.append(NSAttributedString(
+                    string: [line.time, line.text].compactMap { $0 }.joined(separator: "  "),
+                    attributes: [.font: small, .foregroundColor: NSColor.secondaryLabelColor]))
+                if let link = line.link {
+                    out.append(NSAttributedString(string: "  "))
+                    out.append(NSAttributedString(
+                        string: link.title,
+                        attributes: [.font: small, .foregroundColor: NSColor.linkColor, .link: link.url]))
+                }
+                out.addAttribute(.paragraphStyle, value: p, range: NSRange(location: start, length: out.length - start))
+                continue
+            }
+            // "10:41:42<tab>Anna", then the text indented to the same column.
+            let header = NSMutableAttributedString()
+            if let time = line.time {
+                header.append(NSAttributedString(
+                    string: time + "\t",
+                    attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .foregroundColor: NSColor.tertiaryLabelColor]))
+            } else if hasTime {
+                header.append(NSAttributedString(string: "\t", attributes: [.font: small]))
+            }
+            var speaker: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor(line.color)]
+            if let url = line.speakerLink { speaker[.link] = url; speaker[.toolTip] = "Click to name this speaker" }
+            header.append(NSAttributedString(string: line.speaker, attributes: speaker))
+            header.addAttribute(.paragraphStyle, value: style(first: 0, head: column, before: compact ? 8 : 12, after: 2), range: NSRange(location: 0, length: header.length))
+            out.append(header)
+            out.append(NSAttributedString(
+                string: "\n" + line.text,
+                attributes: [
+                    .font: body, .foregroundColor: line.settled ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                    .paragraphStyle: style(first: column, head: column, before: 0),
+                ]))
+        }
+        return out
+    }
+}
+
+/// A transcript as one selectable text view, or a placeholder when it is empty.
+struct TranscriptText: View {
+    let lines: [TranscriptLine]
     var compact = false
-    var speakerHelp: String?
-    var onSpeakerTap: (() -> Void)?
+    var timeWidth: CGFloat = 44
+    var empty: String
+    var onLink: ((URL) -> Void)?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            if let time {
-                Text(time)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .frame(width: timeWidth, alignment: .trailing)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Button { onSpeakerTap?() } label: {
-                    Text(speaker).font(.caption.weight(.semibold)).foregroundStyle(color)
-                }
-                .buttonStyle(.plain)
-                .allowsHitTesting(onSpeakerTap != nil)
-                .help(speakerHelp ?? "")
-                Text(text)
-                    .font(compact ? .callout : .body)
-                    .foregroundStyle(settled ? .primary : .secondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        if lines.isEmpty {
+            Text(empty).foregroundStyle(.secondary).padding(.top, 20)
+        } else {
+            SelectableText(
+                text: TranscriptRenderer.render(lines, compact: compact, timeWidth: timeWidth), linkAttributes: nil,
+                onLink: onLink)
         }
     }
 }

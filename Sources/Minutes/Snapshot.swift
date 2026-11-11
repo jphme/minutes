@@ -50,6 +50,9 @@ enum Snapshot {
             render(
                 DayView(day: day, tab: .transcript).environmentObject(model).environmentObject(passive),
                 size: NSSize(width: 900, height: 1500), to: directory.appendingPathComponent("day-transcript.png"))
+            checkSelection(
+                in: DayView(day: day, tab: .transcript).environmentObject(model).environmentObject(passive), size: tall,
+                label: "day transcript")
             // A finished day leads with its summary.
             if let past = passive.days.first(where: { $0 != passive.today }) {
                 model.selection = DayID.id(past)
@@ -70,6 +73,7 @@ enum Snapshot {
             render(
                 TranscriptView(meeting: meeting, live: false).environmentObject(model),
                 size: NSSize(width: 900, height: 700), to: directory.appendingPathComponent("transcript.png"))
+            checkSelection(in: TranscriptView(meeting: meeting, live: false).environmentObject(model), size: tall, label: "meeting transcript")
             // The same meeting as if recorded with Data Protection (header line, transcript without the others),
             // and the toolbar switch in both states (offscreen windows have no toolbar).
             var protected = meeting
@@ -92,7 +96,7 @@ enum Snapshot {
     /// Drags the mouse from the top to the bottom of the notes in an offscreen window and prints how much text got
     /// selected. Notes must be selectable across paragraphs (SwiftUI `Text` only selects within one), and this
     /// cannot be seen in a picture.
-    private static func checkSelection<V: View>(in view: V, size: NSSize) {
+    private static func checkSelection<V: View>(in view: V, size: NSSize, label: String = "notes") {
         let window = NSWindow(
             contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), styleMask: [.borderless],
             backing: .buffered, defer: false)
@@ -105,7 +109,7 @@ enum Snapshot {
             (v as? NSTextView).map { [$0] } ?? v.subviews.flatMap(textViews)
         }
         guard let notes = textViews(host).filter({ !$0.isEditable }).max(by: { $0.string.count < $1.string.count }) else {
-            print("selection check: no notes text view found")
+            print("selection check (\(label)): FAILED, no selectable text view found")
             return
         }
         let frame = notes.convert(notes.bounds, to: nil)
@@ -128,7 +132,7 @@ enum Snapshot {
         let selected = (notes.string as NSString).substring(with: notes.selectedRange())
         let paragraphs = selected.split(separator: "\n").count
         print(
-            "selection check: a click on the notes reaches \(reachesText ? "the text" : String(describing: hit.map { type(of: $0) })); dragging over them selected \(selected.count) of \(notes.string.count) characters in \(paragraphs) paragraphs")
+            "selection check (\(label)): a click on the text reaches \(reachesText ? "the text" : String(describing: hit.map { type(of: $0) })); dragging over them selected \(selected.count) of \(notes.string.count) characters in \(paragraphs) paragraphs")
         window.orderOut(nil)
     }
 

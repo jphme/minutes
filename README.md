@@ -86,8 +86,9 @@ Everything else is optional:
 - Recording stops 20 s after the call app releases the microphone, or with ⇧⌘R. If the same app takes the microphone
   again within 15 minutes (a dropped call), Minutes offers to **Continue** the meeting. Any meeting can also be
   continued, or merged with the one before it, from its ⋯ menu; speakers are matched across the parts by voice.
-- Copy the notes as Markdown or the raw transcript from the toolbar. Click a speaker label to name that speaker,
-  then regenerate the notes.
+- Select any part of the notes or the transcript (with times and speakers) and copy it, or copy everything with
+  the toolbar's copy button: the notes as Markdown on the Notes tab, the transcript on the Transcript tab. Click a
+  speaker label to name that speaker, then regenerate the notes.
 - Delete a meeting with the trash button, the Delete key or the context menu.
 - Automation: `open minutes://start`, `minutes://stop`, `minutes://toggle`, `minutes://open`, and for passive mode
   `minutes://pause` (`?minutes=N`, default 15) and `minutes://resume`.
@@ -130,7 +131,7 @@ filtered out. After midnight (or on demand) a **day summary** is written that al
 recorded that day.
 
 Each day with passive data has a **Day notes** entry in the sidebar, first in its date section above that day's
-meetings. It works like a meeting: Notes and Transcript tabs, copy notes, copy transcript, update notes, delete.
+meetings. It works like a meeting: Notes and Transcript tabs, copy, update notes, delete.
 
 - **Text only.** Audio stays in memory until its utterance (at most 28 s) is transcribed; no audio is written to disk.
 - **Meetings win.** While a normal meeting recording runs, passive capture pauses; the day transcript links to the
@@ -212,11 +213,12 @@ Settings live in `~/Library/Application Support/Minutes/`: `settings.json`, `con
 ## Sync to a git repository
 
 Settings → Sync takes a git remote, for example a new private GitHub repository. After each meeting, and when notes,
-titles or speaker names change, Minutes commits and pushes. Passive mode's day notes go along whenever they are
-updated (every 10–30 minutes of new speech, and after the day summary); "Forget last 15 min" removes the text there
-too. At launch Minutes exports everything once more, which catches up on anything that could not be pushed before
-(unchanged files make no commit). Deleting a meeting or a day removes it from the repository (it stays in the git
-history).
+titles or speaker names change, Minutes commits and pushes. Passive mode's day notes go once a day, when the day
+summary is written after midnight (or at the next launch if the Mac was off), so the history does not fill with
+small updates. "Update notes" and "Write day summary now" push a day right away, and "Forget last 15 min" removes the
+text from a day that is already there. At launch Minutes exports all meetings and finished days once more, which
+catches up on anything that could not be pushed before (unchanged files make no commit). Deleting a meeting or a
+day removes it from the repository (it stays in the git history).
 
 ```
 README.md, .gitattributes             plain text

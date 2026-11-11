@@ -188,16 +188,12 @@ struct DayView: View {
                         : (isProtected ? DataProtectionToggle.onHelp : DataProtectionToggle.offHelp)
                             + " Applies to today from now on; the default is in Settings."
                 ) { passive.setDataProtection($0) }
-                Button { copyNotes() } label: {
-                    Label("Copy notes", systemImage: copied == "notes" ? "checkmark" : "doc.on.doc")
+                // Copies what the open tab shows. Any part of either can also be selected and copied directly.
+                Button { if tab == .notes { copyNotes() } else { copyTranscript() } } label: {
+                    Label(tab == .notes ? "Copy notes" : "Copy transcript", systemImage: copied != nil ? "checkmark" : "doc.on.doc")
                 }
-                .help("Copy the notes as Markdown")
-                .disabled(leading == nil)
-                Button { copyTranscript() } label: {
-                    Label("Copy transcript", systemImage: copied == "transcript" ? "checkmark" : "text.quote")
-                }
-                .help("Copy the raw transcript with times and sources")
-                .disabled(entries.isEmpty)
+                .help(tab == .notes ? "Copy the notes as Markdown" : "Copy the transcript with times and sources")
+                .disabled(tab == .notes ? leading == nil : entries.isEmpty)
                 Button { updateNotes() } label: { Label("Update notes", systemImage: "sparkles") }
                     .help(
                         !model.hasAPIKey ? "Add an Anthropic API key in Settings → Notes to write notes"
@@ -392,15 +388,15 @@ struct DayView: View {
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(shown) { line in row(line).id(line.id) }
-                        if shown.isEmpty {
-                            Text(
-                                !search.isEmpty || channel != nil ? "No matching lines."
-                                    : live ? "Listening… the transcript appears as people speak." : "No transcript."
-                            )
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 20)
+                    VStack(alignment: .leading, spacing: 0) {
+                        TranscriptText(
+                            lines: shown.map(transcriptLine), timeWidth: 60,
+                            empty: !search.isEmpty || channel != nil ? "No matching lines."
+                                : live ? "Listening… the transcript appears as people speak." : "No transcript."
+                        ) { url in
+                            if url.scheme == "minutes-meeting", let id = UUID(uuidString: String(url.absoluteString.dropFirst("minutes-meeting:".count))) {
+                                model.selection = id
+                            }
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
@@ -425,55 +421,27 @@ struct DayView: View {
         .onDisappear { if isToday { passive.transcriptVisible(false) } }
     }
 
-    @ViewBuilder private func row(_ line: Line) -> some View {
+    private func transcriptLine(_ line: Line) -> TranscriptLine {
         if let entry = line.entry, entry.kind == .meeting {
-            meetingRow(entry)
-        } else if let entry = line.entry, entry.kind == .dataProtection {
-            HStack(spacing: 8) {
-                Image(systemName: entry.text == "on" ? "lock.shield.fill" : "lock.open")
-                Text("\(DayStore.clock(entry.start, seconds: false))  \(DayStore.protectionText(entry.text == "on"))")
+            // A meeting recorded during the day: its own notes and transcript are one click away.
+            let meeting = model.meetings.first { m in
+                entry.meetingID.map { $0 == m.id }
+                    ?? m.allParts.contains { abs($0.startedAt.timeIntervalSince(entry.start)) < 2 }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.leading, 70)
-        } else {
-            TranscriptRow(
-                time: DayStore.clock(line.start), timeWidth: 60, speaker: line.channel == .them ? "Mac" : "Mic",
-                color: SpeakerColor.color(for: line.channel == .them ? "Them" : "Me"), text: line.text, settled: line.settled)
+            let range = "\(DayStore.clock(entry.start, seconds: false))–\(DayStore.clock(entry.end, seconds: false))"
+            return TranscriptLine(
+                text: "● Meeting recorded separately, \(range): \(meeting?.title ?? entry.text)" + (meeting == nil ? " (deleted)" : ""),
+                isNote: true,
+                link: meeting.flatMap { m in URL(string: "minutes-meeting:\(m.id.uuidString)").map { ("Open notes ›", $0) } })
         }
-    }
-
-    /// A meeting recorded during the day: its own notes and transcript are one click away.
-    private func meetingRow(_ entry: DayEntry) -> some View {
-        let meeting = model.meetings.first { m in
-            entry.meetingID.map { $0 == m.id }
-                ?? m.allParts.contains { abs($0.startedAt.timeIntervalSince(entry.start)) < 2 }
+        if let entry = line.entry, entry.kind == .dataProtection {
+            return TranscriptLine(
+                time: DayStore.clock(entry.start, seconds: false),
+                text: (entry.text == "on" ? "🔒 " : "") + DayStore.protectionText(entry.text == "on"), isNote: true)
         }
-        let range = "\(DayStore.clock(entry.start, seconds: false))–\(DayStore.clock(entry.end, seconds: false))"
-        return Button {
-            if let meeting { model.selection = meeting.id }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "record.circle").foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(meeting?.title ?? entry.text).font(.body.weight(.medium)).lineLimit(1)
-                    Text("Meeting, \(range), recorded separately" + (meeting == nil ? " (deleted)" : ""))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if meeting != nil {
-                    Text("Open notes").font(.callout).foregroundStyle(.tint)
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(meeting == nil)
-        .padding(.leading, 70)
+        return TranscriptLine(
+            time: DayStore.clock(line.start), speaker: line.channel == .them ? "Mac" : "Mic",
+            color: SpeakerColor.color(for: line.channel == .them ? "Them" : "Me"), text: line.text, settled: line.settled)
     }
 
     // MARK: Actions

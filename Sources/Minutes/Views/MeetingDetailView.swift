@@ -50,15 +50,12 @@ struct MeetingDetailView: View {
                             ? "Recorded with Data Protection: only your microphone was transcribed."
                             : "Data Protection can be switched only while recording."
                 ) { model.setDataProtection($0, for: meeting) }
-                Button { copyNotes() } label: {
-                    Label("Copy notes", systemImage: copied == "notes" ? "checkmark" : "doc.on.doc")
+                // Copies what the open tab shows. Any part of either can also be selected and copied directly.
+                Button { if tab == .notes { copyNotes() } else { copyTranscript() } } label: {
+                    Label(tab == .notes ? "Copy notes" : "Copy transcript", systemImage: copied != nil ? "checkmark" : "doc.on.doc")
                 }
-                .help("Copy the notes as Markdown")
-                .disabled(model.summary(for: meeting)?.isEmpty ?? true)
-                Button { copyTranscript() } label: {
-                    Label("Copy transcript", systemImage: copied == "transcript" ? "checkmark" : "text.quote")
-                }
-                .help("Copy the raw transcript with timestamps and speakers")
+                .help(tab == .notes ? "Copy the notes as Markdown" : "Copy the transcript with timestamps and speakers")
+                .disabled(tab == .notes ? (model.summary(for: meeting)?.isEmpty ?? true) : model.transcript(for: meeting).isEmpty)
                 if !isLive {
                     Button { model.regenerateSummary(meeting) } label: { Label("Regenerate notes", systemImage: "sparkles") }
                         .help(model.hasAPIKey

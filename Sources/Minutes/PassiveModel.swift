@@ -496,9 +496,11 @@ final class PassiveModel: ObservableObject {
         let digester = DayDigester(store: store, settings: settings)
         Task {
             do {
-                let result = try await Task.detached { try await digester.update(day) }.value
+                _ = try await Task.detached { try await digester.update(day) }.value
                 digestFailedAt[day] = nil
-                if result.calls > result.unchanged { app.scheduleSync(day: day) }
+                // Day notes go to the repository once the day is summarized, not after every automatic update;
+                // a manual update is pushed right away.
+                if !automatic { app.scheduleSync(day: day) }
             } catch {
                 log.error("digest update failed\(automatic ? ", retrying in 15 min" : ""): \(error.localizedDescription)")
                 digestFailedAt[day] = Date()
@@ -540,8 +542,8 @@ final class PassiveModel: ObservableObject {
         for day in Set([DayStore.key(for: since), today]) {
             let n = store.forget(since: since, day: day)
             removed += n
-            // The forgotten text must leave the notes repository too.
-            if n > 0 { app.scheduleSync(day: day) }
+            // The forgotten text must leave the notes repository too (if the day is there already).
+            if n > 0 { app.scheduleSync(dayIfSynced: day) }
         }
         previews.removeAll { $0.start >= since }
         reloadToday()

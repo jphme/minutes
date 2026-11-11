@@ -17,6 +17,10 @@ struct MarkdownView: View {
 /// A read-only, selectable text view that takes the height its text needs at the offered width.
 struct SelectableText: NSViewRepresentable {
     let text: NSAttributedString
+    /// How links look; nil keeps the text's own colors (transcripts use links for clickable speaker names).
+    var linkAttributes: [NSAttributedString.Key: Any]? = [.foregroundColor: NSColor.linkColor, .cursor: NSCursor.pointingHand]
+    /// Handles a click on a link; without it links open in the default app.
+    var onLink: ((URL) -> Void)?
 
     func makeNSView(context: Context) -> NSTextView {
         let view = NSTextView(frame: .zero)
@@ -29,28 +33,51 @@ struct SelectableText: NSViewRepresentable {
         view.isVerticallyResizable = false
         view.isHorizontallyResizable = false
         view.isAutomaticLinkDetectionEnabled = false
-        view.linkTextAttributes = [.foregroundColor: NSColor.linkColor, .cursor: NSCursor.pointingHand]
+        view.linkTextAttributes = linkAttributes ?? [.cursor: NSCursor.pointingHand]
+        view.delegate = context.coordinator
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return view
     }
 
     func updateNSView(_ view: NSTextView, context: Context) {
-        // Replacing the text clears the selection, so only do it when the text changed.
-        if view.textStorage?.isEqual(to: text) != true { view.textStorage?.setAttributedString(text) }
+        context.coordinator.onLink = onLink
+        guard let storage = view.textStorage, !storage.isEqual(to: text) else { return }
+        // Replacing the text clears the selection. A live transcript changes only at its end, so replace just the
+        // part after the unchanged beginning, and a selection above it survives.
+        let old = storage.string as NSString
+        var keep = old.commonPrefix(with: text.string, options: .literal).utf16.count
+        // Back up to a line start: a line's color changes when it settles, with the same text.
+        keep = old.lineRange(for: NSRange(location: min(keep, max(old.length - 1, 0)), length: 0)).location
+        if keep > 0, storage.attributedSubstring(from: NSRange(location: 0, length: keep))
+            .isEqual(to: text.attributedSubstring(from: NSRange(location: 0, length: keep)))
+        {
+            let tail = text.attributedSubstring(from: NSRange(location: keep, length: text.length - keep))
+            storage.replaceCharacters(in: NSRange(location: keep, length: storage.length - keep), with: tail)
+        } else {
+            storage.setAttributedString(text)
+        }
     }
 
     /// SwiftUI asks for sizes at many widths (down to zero) before it places the view. Measuring must not touch the
     /// displayed view's text container: a probe at a narrow width left the text laid out in a 50 pt column whenever
     /// the view's frame did not change afterwards. A separate layout stack does the measuring.
-    final class Coordinator {
+    final class Coordinator: NSObject, NSTextViewDelegate {
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
         let container = NSTextContainer()
+        var onLink: ((URL) -> Void)?
 
-        init() {
+        override init() {
+            super.init()
             container.lineFragmentPadding = 0
             layout.addTextContainer(container)
             storage.addLayoutManager(layout)
+        }
+
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            guard let onLink, let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:)) else { return false }
+            onLink(url)
+            return true
         }
 
         func size(of text: NSAttributedString, width: CGFloat) -> CGSize {

@@ -56,6 +56,7 @@ final class AppModel: ObservableObject {
     private var syncPending: Set<UUID> = []
     private var syncRemoved: Set<UUID> = []
     private var syncDays: Set<String> = []
+    private var syncDaysIfPresent: Set<String> = []
     private var syncRemovedDays: Set<String> = []
     private var syncTask: Task<Void, Never>?
 
@@ -607,10 +608,15 @@ final class AppModel: ObservableObject {
     // MARK: Notes repository
 
     /// Pushes changed meetings and passive days to the notes repository a few seconds after the last change.
-    func scheduleSync(_ id: UUID? = nil, removed: UUID? = nil, day: String? = nil, removedDay: String? = nil) {
+    /// Days are pushed when they are summarized, on a manual update, or when text was deleted (`dayIfSynced`: only
+    /// if the day is in the repository already), not after every automatic update, to keep the history small.
+    func scheduleSync(
+        _ id: UUID? = nil, removed: UUID? = nil, day: String? = nil, dayIfSynced: String? = nil, removedDay: String? = nil
+    ) {
         guard !settings.notesRepository.isEmpty else { return }
         if let id { syncPending.insert(id) }
         if let removed { syncRemoved.insert(removed) }
+        if let dayIfSynced { syncDaysIfPresent.insert(dayIfSynced) }
         if let day { syncDays.insert(day); syncRemovedDays.remove(day) }
         if let removedDay { syncRemovedDays.insert(removedDay); syncDays.remove(removedDay) }
         guard syncTask == nil else { return }
@@ -620,12 +626,13 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Exports every finished meeting and every passive day: after setting up or changing the repository, and at
-    /// launch, which also catches up on changes whose sync was still pending when the app quit (unchanged files
-    /// make no commit).
+    /// Exports every finished meeting and every finished passive day (today waits for its summary): after setting
+    /// up or changing the repository, and at launch, which also catches up on changes whose sync was still pending
+    /// when the app quit or whose day summary was written while it was not running (unchanged files make no commit).
     func syncAll() {
         for m in meetings where m.status == .done { syncPending.insert(m.id) }
-        syncDays.formUnion(PassiveModel.shared.store.days())
+        let today = DayStore.key(for: Date())
+        syncDays.formUnion(PassiveModel.shared.store.days().filter { $0 < today })
         scheduleSync()
     }
 
@@ -633,10 +640,12 @@ final class AppModel: ObservableObject {
         let ids = syncPending
         let removed = syncRemoved
         let days = syncDays
+        let ifPresent = syncDaysIfPresent.subtracting(syncDays)
         let removedDays = syncRemovedDays
         syncPending = []
         syncRemoved = []
         syncDays = []
+        syncDaysIfPresent = []
         syncRemovedDays = []
         let finished = ids.compactMap { meeting($0) }.filter { $0.status == .done }
         let store = store
@@ -648,6 +657,11 @@ final class AppModel: ObservableObject {
                 // Reading every transcript can take a while at launch: off the main thread.
                 let exports = finished.map { NotesRepository.Export(meeting: $0, store: store) }
                 let dayExports = days.sorted().map { NotesRepository.DayExport(day: $0, store: dayStore) }
+                    + ifPresent.sorted().map { day -> NotesRepository.DayExport in
+                        var e = NotesRepository.DayExport(day: day, store: dayStore)
+                        e.onlyIfPresent = true
+                        return e
+                    }
                 return try await repo.sync(exports, removedIDs: Array(removed), days: dayExports, removedDays: Array(removedDays))
             }.value
             syncStatus = "\(result) \(Date().formatted(date: .omitted, time: .shortened))"
@@ -657,10 +671,12 @@ final class AppModel: ObservableObject {
             syncPending.formUnion(ids)
             syncRemoved.formUnion(removed)
             syncDays.formUnion(days.subtracting(syncRemovedDays))
+            syncDaysIfPresent.formUnion(ifPresent)
             syncRemovedDays.formUnion(removedDays.subtracting(syncDays))
         }
         syncTask = nil
         let more = !syncPending.isEmpty || !syncRemoved.isEmpty || !syncDays.isEmpty || !syncRemovedDays.isEmpty
+            || !syncDaysIfPresent.isEmpty
         if more, !(syncStatus ?? "").hasPrefix("Sync failed") { scheduleSync() }
     }
 
