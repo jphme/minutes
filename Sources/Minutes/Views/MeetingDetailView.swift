@@ -94,7 +94,7 @@ struct MeetingDetailView: View {
             HStack(spacing: 10) {
                 Label(meeting.startedAt.formatted(.dateTime.weekday().day().month().year().hour().minute()), systemImage: "calendar")
                 if isLive {
-                    Label(clock(model.elapsed), systemImage: "record.circle.fill").foregroundStyle(.red)
+                    Label { ElapsedTime() } icon: { Image(systemName: "record.circle.fill") }.foregroundStyle(.red)
                 } else if let d = meeting.duration {
                     Label("\(Int(max(1, d / 60))) min", systemImage: "clock")
                 }

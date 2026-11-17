@@ -90,6 +90,7 @@ enum Snapshot {
                 .padding(12),
                 size: NSSize(width: 520, height: 0), to: directory.appendingPathComponent("toggle-data-protection.png"))
         }
+        checkTranscriptSpeed()
         exit(0)
     }
 
@@ -112,7 +113,8 @@ enum Snapshot {
             print("selection check (\(label)): FAILED, no selectable text view found")
             return
         }
-        let frame = notes.convert(notes.bounds, to: nil)
+        // A transcript's text view sits in its own scroll view: only the part on screen.
+        let frame = notes.convert(notes.enclosingScrollView?.documentView === notes ? notes.visibleRect : notes.bounds, to: nil)
         func mouse(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
             NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -172,6 +174,79 @@ enum Snapshot {
         }
     }
 
+    /// Measures a long transcript (a made-up three-hour call): opening it, streaming lines into it the way a live
+    /// recording does, and scrolling through it. A transcript re-rendered and laid out in full on every change once
+    /// froze the app during long calls and stopped the live transcript.
+    static func checkTranscriptSpeed() {
+        let words = "so we looked at the numbers again and the second quarter is fine but the pipeline for next year needs more work and I would like to talk about hiring too".split(separator: " ")
+        func line(_ i: Int, settled: Bool = true) -> TranscriptLine {
+            let text = (0..<45).map { words[($0 * 7 + i) % words.count] }.joined(separator: " ")
+            return TranscriptLine(
+                time: clock(Double(i) * 7), speaker: "Speaker \(i % 4 + 1)", color: SpeakerColor.color(for: "Speaker \(i % 4 + 1)"),
+                text: text, settled: settled)
+        }
+        let count = 1500
+        let box = LinesBox(lines: (0..<count).map { line($0) })
+        let size = NSSize(width: 900, height: 700)
+        let window = NSWindow(
+            contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        func settle() {
+            RunLoop.main.run(until: Date())
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+        }
+        var t = Date()
+        let host = NSHostingView(rootView: TranscriptFeed(box: box).frame(width: size.width, height: size.height))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        settle()
+        let open = Date().timeIntervalSince(t)
+
+        // Streaming: a line grows a few times, then settles and the next one starts.
+        let updates = 60
+        t = Date()
+        for i in 0..<updates {
+            var next = line(count + i / 3, settled: i % 3 == 2)
+            next.text = String(next.text.prefix(80 * (i % 3 + 1)))
+            if i % 3 == 0 { box.lines.append(next) } else { box.lines[box.lines.count - 1] = next }
+            settle()
+        }
+        let update = Date().timeIntervalSince(t) / Double(updates)
+
+        func scrollViews(_ v: NSView) -> [NSScrollView] { (v as? NSScrollView).map { [$0] } ?? v.subviews.flatMap(scrollViews) }
+        var scroll = "no scroll view"
+        if let sv = scrollViews(host).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }),
+            let doc = sv.documentView
+        {
+            // Following live: the newest line must be on screen.
+            let shows = (doc as? NSTextView).map { tv in
+                tv.string.hasSuffix(box.lines.last!.text) && sv.contentView.bounds.maxY >= tv.frame.maxY - 2
+            }
+            print("transcript follow check: the newest line is \(shows == true ? "in view" : "NOT in view (FAILED)") after streaming")
+            let steps = 100
+            let height = doc.frame.height - sv.contentView.bounds.height
+            t = Date()
+            for s in 0...steps {
+                sv.contentView.scroll(to: NSPoint(x: 0, y: height * Double(s) / Double(steps)))
+                sv.reflectScrolledClipView(sv.contentView)
+                window.display()
+            }
+            scroll = String(format: "%.1f ms per scroll step over %.0f pt", Date().timeIntervalSince(t) * 1000 / Double(steps + 1), height)
+            // A reader who scrolled up to read stays where they are when the next line arrives.
+            sv.contentView.scroll(to: NSPoint(x: 0, y: height / 2))
+            sv.reflectScrolledClipView(sv.contentView)
+            settle()
+            box.lines.append(line(count + updates))
+            settle()
+            let stays = abs(sv.contentView.bounds.minY - height / 2) < 1
+            print("transcript follow check: a reader who scrolled up \(stays ? "stays in place" : "is pulled to the end (FAILED)") when a line arrives")
+        }
+        print(String(format: "transcript speed check (%d lines): open %.0f ms, %.1f ms per live update, %@", count, open * 1000, update * 1000, scroll))
+        window.orderOut(nil)
+    }
+
     private static func render<V: View>(_ view: V, size: NSSize, to url: URL) {
         let window = NSWindow(
             contentRect: NSRect(origin: NSPoint(x: -20000, y: -20000), size: size), styleMask: [.borderless],
@@ -193,4 +268,18 @@ enum Snapshot {
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
         window.orderOut(nil)
     }
+}
+
+/// Lines that change while a view shows them, for the transcript speed check.
+@MainActor
+final class LinesBox: ObservableObject {
+    @Published var lines: [TranscriptLine]
+    init(lines: [TranscriptLine]) { self.lines = lines }
+}
+
+/// A transcript shown the way `TranscriptView` shows a live one.
+struct TranscriptFeed: View {
+    @ObservedObject var box: LinesBox
+
+    var body: some View { TranscriptText(lines: box.lines, empty: "", follow: true) }
 }

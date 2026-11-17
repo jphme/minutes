@@ -386,33 +386,15 @@ struct DayView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 8)
             Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        TranscriptText(
-                            lines: shown.map(transcriptLine), timeWidth: 60,
-                            empty: !search.isEmpty || channel != nil ? "No matching lines."
-                                : live ? "Listening… the transcript appears as people speak." : "No transcript."
-                        ) { url in
-                            if url.scheme == "minutes-meeting", let id = UUID(uuidString: String(url.absoluteString.dropFirst("minutes-meeting:".count))) {
-                                model.selection = id
-                            }
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }
-                    .padding(24)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity)
-                }
-                .onAppear {
-                    // Today opens at the newest line; a finished day reads from the top, like a meeting.
-                    if isToday { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
-                }
-                .onChange(of: shown.count) { _, _ in
-                    if live && followLive { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) } }
-                }
-                .onChange(of: shown.last?.text) { _, _ in
-                    if live && followLive { proxy.scrollTo("bottom", anchor: .bottom) }
+            // Today opens at the newest line; a finished day reads from the top, like a meeting.
+            TranscriptText(
+                lines: shown.map(transcriptLine), timeWidth: 60,
+                empty: !search.isEmpty || channel != nil ? "No matching lines."
+                    : live ? "Listening… the transcript appears as people speak." : "No transcript.",
+                follow: live && followLive, startAtBottom: isToday
+            ) { url in
+                if url.scheme == "minutes-meeting", let id = UUID(uuidString: String(url.absoluteString.dropFirst("minutes-meeting:".count))) {
+                    model.selection = id
                 }
             }
         }
@@ -432,7 +414,7 @@ struct DayView: View {
             return TranscriptLine(
                 text: "● Meeting recorded separately, \(range): \(meeting?.title ?? entry.text)" + (meeting == nil ? " (deleted)" : ""),
                 isNote: true,
-                link: meeting.flatMap { m in URL(string: "minutes-meeting:\(m.id.uuidString)").map { ("Open notes ›", $0) } })
+                link: meeting.flatMap { m in URL(string: "minutes-meeting:\(m.id.uuidString)").map { .init(title: "Open notes ›", url: $0) } })
         }
         if let entry = line.entry, entry.kind == .dataProtection {
             return TranscriptLine(
