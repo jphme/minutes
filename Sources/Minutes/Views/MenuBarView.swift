@@ -10,7 +10,7 @@ struct MenuBarLabel: View {
         Group {
             if model.isRecording {
                 // Red dot + elapsed time, like a call indicator.
-                Label(clock(model.elapsed), systemImage: "record.circle.fill")
+                Label { ElapsedTime() } icon: { Image(systemName: "record.circle.fill") }
                     .labelStyle(.titleAndIcon)
                     .symbolRenderingMode(.palette)
                     .foregroundStyle(.red, .primary)
@@ -103,7 +103,7 @@ struct MenuBarView: View {
             Text("Minutes").font(.headline)
             Spacer()
             if model.isRecording {
-                LevelMeter(level: model.levels.me, label: "Me")
+                LevelMeter(channel: .me, label: "Me")
                 ThemMeterOrShield()
             }
         }
@@ -115,7 +115,7 @@ struct MenuBarView: View {
         } label: {
             HStack {
                 Image(systemName: model.isRecording ? "stop.fill" : "record.circle")
-                Text(model.isRecording ? "Stop · \(clock(model.elapsed))" : "Start recording")
+                if model.isRecording { ElapsedTime(prefix: "Stop · ") } else { Text("Start recording") }
                 Spacer()
                 Text("⇧⌘R").foregroundStyle(.secondary).font(.caption)
             }
@@ -216,21 +216,54 @@ extension MenuBarView {
     }
 }
 
+/// Elapsed time and audio levels of the recording, apart from `AppModel` because they change ten times a second:
+/// only the small views that show them observe this, not every view of the app.
+@MainActor
+final class RecordingMeters: ObservableObject {
+    /// Whole seconds.
+    @Published var elapsed: TimeInterval = 0
+    @Published var levels: (me: Float, them: Float) = (0, 0)
+}
+
+/// The recording's elapsed time ("12:04"), after an optional prefix.
+struct ElapsedTime: View {
+    @EnvironmentObject var model: AppModel
+    var prefix = ""
+
+    var body: some View { Clock(meters: model.meters, prefix: prefix) }
+
+    private struct Clock: View {
+        @ObservedObject var meters: RecordingMeters
+        let prefix: String
+        var body: some View { Text(prefix + clock(meters.elapsed)).monospacedDigit() }
+    }
+}
+
 struct LevelMeter: View {
-    var level: Float
+    @EnvironmentObject var model: AppModel
+    var channel: Channel
     var label: String
 
-    var body: some View {
-        HStack(spacing: 3) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.quaternary)
-                    Capsule().fill(.green)
-                        .frame(width: geo.size.width * CGFloat(min(1, sqrt(Double(level)) * 2.5)))
+    var body: some View { Bar(meters: model.meters, channel: channel, label: label) }
+
+    private struct Bar: View {
+        @ObservedObject var meters: RecordingMeters
+        let channel: Channel
+        let label: String
+
+        var body: some View {
+            let level = channel == .me ? meters.levels.me : meters.levels.them
+            HStack(spacing: 3) {
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.quaternary)
+                        Capsule().fill(.green)
+                            .frame(width: geo.size.width * CGFloat(min(1, sqrt(Double(level)) * 2.5)))
+                    }
                 }
+                .frame(width: 36, height: 5)
             }
-            .frame(width: 36, height: 5)
         }
     }
 }
@@ -246,7 +279,7 @@ struct ThemMeterOrShield: View {
                 .foregroundStyle(.secondary)
                 .help("Data Protection: the other participants are not recorded")
         } else {
-            LevelMeter(level: model.levels.them, label: "Them")
+            LevelMeter(channel: .them, label: "Them")
         }
     }
 }

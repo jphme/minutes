@@ -21,8 +21,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var modelStatus: String?
     @Published private(set) var stageText: [UUID: String] = [:]
     @Published private(set) var streamingSummary: [UUID: String] = [:]
-    @Published private(set) var elapsed: TimeInterval = 0
-    @Published private(set) var levels: (me: Float, them: Float) = (0, 0)
+    /// Elapsed time and audio levels of the recording. They change ten times a second, so they live in their own
+    /// object: as properties of this model they made every view that shows anything of it update ten times a
+    /// second, the live transcript included.
+    let meters = RecordingMeters()
     @Published var lastError: String?
     /// Calendar events to offer when starting a recording (running now and the rest of today).
     @Published private(set) var upcomingEvents: [CalendarService.EventInfo] = []
@@ -293,11 +295,27 @@ final class AppModel: ObservableObject {
     func transcript(for meeting: Meeting) -> [TranscriptSegment] {
         if let session = recording, session.meeting.id == meeting.id {
             // After a resume, earlier parts already have a final transcript.
-            let earlier = session.part > 0 ? (store.loadFinalTranscript(for: meeting) ?? []) : []
+            let earlier = session.part > 0 ? cached(meeting, final: true) { store.loadFinalTranscript(for: meeting) ?? [] } : []
             let all = earlier + liveSegments.filter { !$0.text.isEmpty }
             return (self.meeting(meeting.id) ?? meeting).isProtected ? all.filter { $0.channel != .them } : all
         }
-        return store.loadTranscript(for: meeting)
+        return cached(meeting, final: false) { store.loadTranscript(for: meeting) }
+    }
+
+    /// Transcripts read from disk, until their files change. Views ask for a transcript every time they update, and
+    /// decoding a long call's transcript.json (megabytes, with word timings) each time made the app sluggish.
+    private var transcriptCache: [UUID: (key: [AnyHashable], segments: [TranscriptSegment])] = [:]
+
+    private func cached(_ meeting: Meeting, final: Bool, load: () -> [TranscriptSegment]) -> [TranscriptSegment] {
+        var key: [AnyHashable] = [final, meeting.isProtected, meeting.folderName]
+        for name in ["transcript.json", "live.jsonl"] {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: store.file(name, for: meeting).path)
+            key += [attributes?[.modificationDate] as? Date, attributes?[.size] as? Int]
+        }
+        if let hit = transcriptCache[meeting.id], hit.key == key { return hit.segments }
+        let segments = load()
+        transcriptCache[meeting.id] = (key, segments)
+        return segments
     }
 
     func hasAudio(_ meeting: Meeting) -> Bool { store.hasAudio(meeting) }
@@ -450,7 +468,7 @@ final class AppModel: ObservableObject {
         ticker = nil
         recording = nil
         recordingTrigger = nil
-        levels = (0, 0)
+        meters.levels = (0, 0)
         detector?.reset()
         var m = store.reload(session.meeting) ?? session.meeting
         let now = Date()
@@ -511,8 +529,10 @@ final class AppModel: ObservableObject {
         ticker = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let session = self.recording else { return }
-                self.elapsed = session.elapsed
-                self.levels = (session.level(.me), session.level(.them))
+                // Whole seconds: the clock shows no more, and its views then update once a second.
+                let elapsed = session.elapsed.rounded(.down)
+                if self.meters.elapsed != elapsed { self.meters.elapsed = elapsed }
+                self.meters.levels = (session.level(.me), session.level(.them))
             }
         }
     }

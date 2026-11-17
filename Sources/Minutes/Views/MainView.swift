@@ -112,7 +112,7 @@ struct MainView: View {
                         Image(systemName: "record.circle.fill").foregroundStyle(.red)
                         Text(rec.meeting.title).lineLimit(1)
                         Spacer()
-                        Text(clock(model.elapsed)).monospacedDigit().foregroundStyle(.secondary)
+                        ElapsedTime().foregroundStyle(.secondary)
                     }
                     .tag(rec.meeting.id)
                 } header: { Text("Recording now") }
